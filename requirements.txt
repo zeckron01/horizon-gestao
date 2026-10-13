@@ -1,0 +1,6 @@
+# Versões com as quais a plataforma foi desenvolvida e testada (Python 3.11+; testado em 3.13)
+starlette==1.6.0
+python-multipart==0.0.32
+openpyxl==3.1.5
+reportlab==5.0.1
+python-docx==1.2.0
