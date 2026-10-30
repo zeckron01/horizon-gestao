@@ -4,6 +4,7 @@ inconsistências; (2) confirmação pelo administrador, gravando tudo em uma ún
 Princípios: nada é inventado — dado ausente ou ambíguo fica vazio e sinalizado para revisão; células vazias,
 legendas, cabeçalhos e fórmulas não viram registros; os arquivos originais ficam guardados; reimportar não duplica
 (cada registro leva a chave de origem em `source`)."""
+from ..i18n import _t
 import hashlib
 import io
 import json
@@ -16,11 +17,11 @@ from ..core import (STAFF, Ctx, F, audit, bad, conflict, forbidden, fmt_date, fr
 from ..db import new_id, now_iso
 from .scope import norm
 
-KIND_LABEL = {"gantt": "Matriz Gantt", "planejamento": "Planejamento de gestão", "raci": "Matriz RACI", "riscos": "Matriz de riscos",
-              "eap": "Estrutura Analítica do Projeto", "orcamento": "Orçamento", "stakeholders": "Stakeholders", "escopo": "Escopo do projeto",
-              "evidencias": "Evidências de monitoramento"}
-SECTION_LABEL = {"people": "Integrantes", "wbs": "EAP", "activities": "Atividades", "risks": "Riscos", "expenses": "Itens do orçamento",
-                 "stakeholders": "Stakeholders", "scope": "Escopo", "evidence": "Evidências"}
+KIND_LABEL = {"gantt": _t("Matriz Gantt"), "planejamento": _t("Planejamento de gestão"), "raci": _t("Matriz RACI"), "riscos": _t("Matriz de riscos"),
+              "eap": _t("Estrutura Analítica do Projeto"), "orcamento": _t("Orçamento"), "stakeholders": _t("Stakeholders"), "escopo": _t("Escopo do projeto"),
+              "evidencias": _t("Evidências de monitoramento")}
+SECTION_LABEL = {"people": _t("Integrantes"), "wbs": "EAP", "activities": _t("Atividades"), "risks": _t("Riscos"), "expenses": _t("Itens do orçamento"),
+                 "stakeholders": _t("Stakeholders"), "scope": _t("Escopo"), "evidence": _t("Evidências")}
 AREA_ALIASES = {"engenharia": "Engenharia", "engenheiro": "Engenharia", "gestao": "Gestão do projeto", "gestao do projeto": "Gestão do projeto",
                 "empreendimento": "Empreendimento", "empreedimento": "Empreendimento", "empreendedorismo": "Empreendimento", "projeto social": "Projeto social"}
 PROB_MAP = {"raro": 1, "improvavel": 2, "possivel": 3, "provavel": 4, "muito provavel": 5}
@@ -130,9 +131,9 @@ def parse_range(value, year):
             out.append(date(year, int(mm), int(dd)).isoformat())
         except ValueError:
             out.append(None)
-            problems.append(f"data inexistente “{dd}/{mm}”")
+            problems.append(_t("data inexistente “{0}/{1}”", dd, mm))
     if not found:
-        problems.append(f"período não reconhecido “{s}”")
+        problems.append(_t("período não reconhecido “{0}”", s))
         return None, None, problems
     if len(out) >= 2:
         return out[0], out[1], problems
@@ -156,7 +157,7 @@ def read_gantt(wb, year, today):
         if isinstance(e, str) and norm(fcol) == "dependencia":
             area = area_of(e)
             if not area:
-                notes.append(flag("revisar", f"Linha {r}: área “{e.strip()}” não reconhecida."))
+                notes.append(flag("revisar", _t("Linha {0}: área “{1}” não reconhecida.", r, e.strip())))
             continue
         if not isinstance(e, str) or e.startswith("="):
             continue
@@ -170,18 +171,18 @@ def read_gantt(wb, year, today):
         ps, pe, pr = parse_range(sh.v(r, 7), year)
         as_, ae, ar = parse_range(sh.v(r, 8), year)
         for p in pr:
-            flags.append(flag("revisar", f"Tempo estimado: {p}."))
+            flags.append(flag("revisar", _t("Tempo estimado: {0}.", p)))
         for p in ar:
-            flags.append(flag("revisar", f"Tempo real: {p} — data real não importada."))
+            flags.append(flag("revisar", _t("Tempo real: {0} — data real não importada.", p)))
         if ps and pe and ps > pe:
-            flags.append(flag("revisar", "Início planejado posterior ao término; início não importado."))
+            flags.append(flag("revisar", _t("Início planejado posterior ao término; início não importado.")))
             ps = None
         if not pe and ps:
             pe, ps = ps, None
         if not pe:
-            flags.append(flag("revisar", "Sem prazo planejado na planilha."))
+            flags.append(flag("revisar", _t("Sem prazo planejado na planilha.")))
         elif not ps:
-            flags.append(flag("info", "A planilha traz apenas o prazo final (sem data de início)."))
+            flags.append(flag("info", _t("A planilha traz apenas o prazo final (sem data de início).")))
         if as_ and as_ > today:
             as_, ae = None, None
             future_real += 1
@@ -189,13 +190,13 @@ def read_gantt(wb, year, today):
             ae = None
             future_real += 1
         if as_ and ae and as_ > ae:
-            flags.append(flag("revisar", "Início real posterior à conclusão real; conclusão não importada."))
+            flags.append(flag("revisar", _t("Início real posterior à conclusão real; conclusão não importada.")))
             ae = None
         if sh.v(r, 8) is None and pe and pe <= today:
-            flags.append(flag("revisar", "Sem “tempo real” na planilha: a situação não pôde ser determinada; confirme se a entrega foi concluída."))
+            flags.append(flag("revisar", _t("Sem “tempo real” na planilha: a situação não pôde ser determinada; confirme se a entrega foi concluída.")))
         status = "concluida" if ae else "em_andamento" if as_ else "nao_iniciada"
         milestone = any(fill_of(ws.cell(rr, c)) in MILESTONE_COLORS for rr in range(r, min(r + 4, sh.rows + 1)) for c in range(9, 37))
-        items.append({"key": f"gantt:{norm(area)}:{seq}", "origin": "gantt", "area": area, "seq": seq, "title": title, "category": "Entrega do cronograma",
+        items.append({"key": f"gantt:{norm(area)}:{seq}", "origin": "gantt", "area": area, "seq": seq, "title": title, "category": _t("Entrega do cronograma"),
                       "planned_start": ps, "planned_end": pe, "actual_start": as_, "actual_end": ae, "status": status,
                       "progress": 100 if status == "concluida" else 0, "is_milestone": milestone, "deps": deps, "flags": flags})
     by_area = {}
@@ -205,28 +206,27 @@ def read_gantt(wb, year, today):
     for it in items:
         missing = [d for d in it["deps"] if d not in by_area[it["area"]] or d == it["seq"]]
         if missing:
-            it["flags"].append(flag("revisar", f"Dependência para item inexistente ({', '.join(map(str, missing))}) — não importada."))
+            it["flags"].append(flag("revisar", _t("Dependência para item inexistente ({0}) — não importada.", ', '.join(map(str, missing)))))
             it["deps"] = [d for d in it["deps"] if d not in missing]
         k = (it["area"], norm(it["title"]))
         if k in seen:
-            it["flags"].append(flag("revisar", f"Título repetido na mesma área (item {seen[k]}) — verifique se é duplicidade."))
+            it["flags"].append(flag("revisar", _t("Título repetido na mesma área (item {0}) — verifique se é duplicidade.", seen[k])))
         seen[k] = it["seq"]
     if future_real:
-        notes.append(flag("info", f"{future_real} atividade(s) tinham “tempo real” com datas futuras (cópia do planejado): essas datas reais não foram importadas."))
-    notes.append(flag("info", "A situação das atividades foi inferida do “tempo real”: com término real = concluída; só início real = em andamento; sem datas reais = não iniciada."))
+        notes.append(flag("info", _t("{0} atividade(s) tinham “tempo real” com datas futuras (cópia do planejado): essas datas reais não foram importadas.", future_real)))
+    notes.append(flag("info", _t("A situação das atividades foi inferida do “tempo real”: com término real = concluída; só início real = em andamento; sem datas reais = não iniciada.")))
     n_ff = 0
     for it in items:
         ff = [d for d in it["deps"] if dep_type(by_area[it["area"]].get(d), it) == "FF"]
         if ff:
             n_ff += len(ff)
-            it["flags"].append(flag("info", f"Começa antes do fim do(s) item(ns) {', '.join(map(str, ff))} de que depende: essa(s) dependência(s) entra(m) como Término→Término (confira o tipo)."))
+            it["flags"].append(flag("info", _t("Começa antes do fim do(s) item(ns) {0} de que depende: essa(s) dependência(s) entra(m) como Término→Término (confira o tipo).", ', '.join(map(str, ff)))))
         bad = [d for d in it["deps"] if d not in ff and by_area[it["area"]].get(d) and it["planned_end"] and by_area[it["area"]][d].get("planned_end")
                and (it["planned_start"] or it["planned_end"]) < by_area[it["area"]][d]["planned_end"]]
         if bad:
-            it["flags"].append(flag("revisar", f"Datas incompatíveis com a dependência do(s) item(ns) {', '.join(map(str, bad))}: termina antes da predecessora."))
-    notes.append(flag("info", "Marcos de entrega: importados apenas onde a planilha tem a célula de marco pintada."))
-    notes.append(flag("info", "A planilha só indica “depende de”, sem o tipo. Regra usada: Término→Início quando a sucessora começa depois do fim da predecessora; "
-                              f"Término→Término quando começa antes mas termina depois ({n_ff} caso(s)). Sem defasagem. O tipo pode ser alterado depois em cada atividade."))
+            it["flags"].append(flag("revisar", _t("Datas incompatíveis com a dependência do(s) item(ns) {0}: termina antes da predecessora.", ', '.join(map(str, bad)))))
+    notes.append(flag("info", _t("Marcos de entrega: importados apenas onde a planilha tem a célula de marco pintada.")))
+    notes.append(flag("info", _t("A planilha só indica “depende de”, sem o tipo. Regra usada: Término→Início quando a sucessora começa depois do fim da predecessora; Término→Término quando começa antes mas termina depois ({0} caso(s)). Sem defasagem. O tipo pode ser alterado depois em cada atividade.", n_ff)))
     return {"activities": items, "notes": notes}
 
 
@@ -243,7 +243,7 @@ def read_planning(wb, year, today):
                 legend[fill_of(ws.cell(r, 13)) or color] = st
     items, notes, category, counter = [], [], None, 0
     if not legend:
-        notes.append(flag("revisar", "Legenda de cores não encontrada: a situação das demandas não pôde ser lida."))
+        notes.append(flag("revisar", _t("Legenda de cores não encontrada: a situação das demandas não pôde ser lida.")))
     for r in range(8, sh.rows + 1):
         b = sh.v(r, 2)
         if not isinstance(b, str) or not b.strip():
@@ -263,18 +263,18 @@ def read_planning(wb, year, today):
         status = legend.get(color)
         if not status:
             status = "nao_iniciada"
-            flags.append(flag("revisar", "A planilha não indica a situação (célula “Progresso” sem cor): importada como não iniciada."))
+            flags.append(flag("revisar", _t("A planilha não indica a situação (célula “Progresso” sem cor): importada como não iniciada.")))
         if status == "concluida":
-            flags.append(flag("revisar", "Marcada como pronta na planilha, mas sem data real de conclusão: informe a data."))
+            flags.append(flag("revisar", _t("Marcada como pronta na planilha, mas sem data real de conclusão: informe a data.")))
         if not pe:
-            flags.append(flag("info", "Sem prazo na planilha."))
+            flags.append(flag("info", _t("Sem prazo na planilha.")))
         if norm(t) == "documento":
-            flags.append(flag("revisar", "Título genérico (“Documento”): defina um título que identifique a entrega."))
-        items.append({"key": f"planejamento:{counter}", "origin": "planejamento", "area": "Gestão do projeto", "seq": None, "title": t,
+            flags.append(flag("revisar", _t("Título genérico (“Documento”): defina um título que identifique a entrega.")))
+        items.append({"key": f"planejamento:{counter}", "origin": "planejamento", "area": _t("Gestão do projeto"), "seq": None, "title": t,
                       "description": re.sub(r"[ \t]+", " ", sh.s(r, 4)) or None, "category": category, "planned_start": None, "planned_end": pe,
                       "actual_start": None, "actual_end": None, "status": status, "progress": 100 if status == "concluida" else 0,
                       "is_milestone": False, "deps": [], "flags": flags})
-    notes.append(flag("info", "A situação de cada demanda foi lida da cor da célula “Progresso”, conforme a legenda da própria planilha."))
+    notes.append(flag("info", _t("A situação de cada demanda foi lida da cor da célula “Progresso”, conforme a legenda da própria planilha.")))
     return {"activities": items, "notes": notes}
 
 
@@ -304,30 +304,30 @@ def read_raci(wb, year, today):
             if v in ("R", "A", "C", "I"):
                 assign[key] = v
             elif v:
-                flags.append(flag("revisar", f"Valor “{v}” não é um papel RACI válido — ignorado."))
+                flags.append(flag("revisar", _t("Valor “{0}” não é um papel RACI válido — ignorado.", v)))
         approvers = [k for k, v in assign.items() if v == "A"]
         for k in approvers:
             if k in teacher_keys:
                 del assign[k]
-                flags.append(flag("revisar", "Na planilha o professor técnico estava como aprovador (A): atribuição não importada, pois a regra atual proíbe."))
+                flags.append(flag("revisar", _t("Na planilha o professor técnico estava como aprovador (A): atribuição não importada, pois a regra atual proíbe.")))
         if len([k for k, v in assign.items() if v == "A"]) > 1:
             for k in [k for k, v in assign.items() if v == "A"][1:]:
                 del assign[k]
-            flags.append(flag("revisar", "Mais de um aprovador (A) na planilha: apenas o primeiro foi mantido."))
+            flags.append(flag("revisar", _t("Mais de um aprovador (A) na planilha: apenas o primeiro foi mantido.")))
         if "A" not in assign.values():
-            flags.append(flag("revisar", "Sem aprovador final (A)."))
+            flags.append(flag("revisar", _t("Sem aprovador final (A).")))
         rs = [k for k, v in assign.items() if v == "R"]
         if not rs:
-            flags.append(flag("revisar", "Sem responsável pela execução (R)."))
+            flags.append(flag("revisar", _t("Sem responsável pela execução (R).")))
         elif len(rs) > 1:
-            flags.append(flag("info", "Mais de um responsável (R): o responsável principal ficou em branco para a equipe definir."))
-        flags.append(flag("info", "A planilha RACI não traz prazo para esta entrega."))
-        acts.append({"key": f"raci:{norm(area)}:{norm(title)}", "origin": "raci", "area": area, "seq": None, "title": title, "category": "Entregável (RACI)",
+            flags.append(flag("info", _t("Mais de um responsável (R): o responsável principal ficou em branco para a equipe definir.")))
+        flags.append(flag("info", _t("A planilha RACI não traz prazo para esta entrega.")))
+        acts.append({"key": f"raci:{norm(area)}:{norm(title)}", "origin": "raci", "area": area, "seq": None, "title": title, "category": _t("Entregável (RACI)"),
                      "planned_start": None, "planned_end": None, "actual_start": None, "actual_end": None, "status": "nao_iniciada", "progress": 0,
                      "is_milestone": False, "deps": [], "flags": flags, "raci": assign, "owner_key": rs[0] if len(rs) == 1 else None})
-    notes.append(flag("info", "As 18 entregas da matriz RACI viram atividades (categoria “Entregável (RACI)”) para que a matriz fique ligada ao planejamento. "
-                              "Elas não têm datas na planilha." if len(acts) == 18 else
-                      "As entregas da matriz RACI viram atividades (categoria “Entregável (RACI)”), sem datas."))
+    notes.append(flag("info", _t("As 18 entregas da matriz RACI viram atividades (categoria “Entregável (RACI)”) para que a matriz fique ligada ao planejamento. "
+                              "Elas não têm datas na planilha.") if len(acts) == 18 else
+                      _t("As entregas da matriz RACI viram atividades (categoria “Entregável (RACI)”), sem datas.")))
     return {"people": people, "activities": acts, "notes": notes}
 
 
@@ -341,7 +341,7 @@ def read_risks(wb, year, today):
             header, cols = r, row
             break
     if not header:
-        return {"risks": [], "notes": [flag("revisar", "Cabeçalho da matriz de riscos não encontrado.")]}
+        return {"risks": [], "notes": [flag("revisar", _t("Cabeçalho da matriz de riscos não encontrado."))]}
 
     def col(*names):
         for n in names:
@@ -359,9 +359,9 @@ def read_risks(wb, year, today):
         p_txt, i_txt, lvl = sh.s(r, c_p), sh.s(r, c_i), sh.s(r, c_n) if c_n else ""
         p, i = PROB_MAP.get(norm(p_txt)), IMPACT_MAP.get(norm(i_txt))
         if not p:
-            flags.append(flag("revisar", f"Probabilidade “{p_txt}” não corresponde à escala — deixada em branco."))
+            flags.append(flag("revisar", _t("Probabilidade “{0}” não corresponde à escala — deixada em branco.", p_txt)))
         if not i:
-            flags.append(flag("revisar", f"Impacto “{i_txt}” não corresponde à escala — deixado em branco."))
+            flags.append(flag("revisar", _t("Impacto “{0}” não corresponde à escala — deixado em branco.", i_txt)))
         owner_txt = re.sub(r"\s+", " ", sh.s(r, c_o)) if c_o else ""
         areas = []
         for part in re.split(r"\+|/| e ", owner_txt):
@@ -369,13 +369,13 @@ def read_risks(wb, year, today):
             if a and a not in areas:
                 areas.append(a)
             elif part.strip() and not a:
-                flags.append(flag("revisar", f"Responsável “{part.strip()}” não corresponde a uma área cadastrada."))
+                flags.append(flag("revisar", _t("Responsável “{0}” não corresponde a uma área cadastrada.", part.strip())))
         risks.append({"key": f"risco:{norm(title)}", "code": f"R-{n:03d}", "title": title, "cause": sh.s(r, c_c) or None, "consequence": sh.s(r, c_q) or None,
                       "probability": p, "impact": i, "original_probability": p_txt or None, "original_impact": i_txt or None, "original_level": lvl or None,
                       "mitigation": sh.s(r, c_m) or None, "owner_text": owner_txt or None, "areas": areas, "flags": flags})
-    notes = [flag("info", "Regra de conversão da escala textual para 1–5 — Probabilidade: Raro=1, Improvável=2, Possível=3, Provável=4, Muito provável=5; "
-                          "Impacto: Muito baixo=1, Baixo=2, Médio=3, Alto=4, Muito alto=5. O nível original da planilha é preservado ao lado do nível calculado (P×I)."),
-             flag("info", "A coluna “Responsável” da planilha indica áreas, não pessoas: as áreas foram vinculadas e o responsável (pessoa) ficou em branco.")]
+    notes = [flag("info", _t("Regra de conversão da escala textual para 1–5 — Probabilidade: Raro=1, Improvável=2, Possível=3, Provável=4, Muito provável=5; "
+                          "Impacto: Muito baixo=1, Baixo=2, Médio=3, Alto=4, Muito alto=5. O nível original da planilha é preservado ao lado do nível calculado (P×I).")),
+             flag("info", _t("A coluna “Responsável” da planilha indica áreas, não pessoas: as áreas foram vinculadas e o responsável (pessoa) ficou em branco."))]
     return {"risks": risks, "notes": notes}
 
 
@@ -400,11 +400,11 @@ def read_wbs(wb, year, today):
                         if norm(seen[code]["name"]) == norm(name):
                             dup += 1
                         else:
-                            seen[code]["flags"].append(flag("revisar", f"O código {code} aparece também como “{name}” ({ws.title}!{c.coordinate})."))
+                            seen[code]["flags"].append(flag("revisar", _t("O código {0} aparece também como “{1}” ({2}!{3}).", code, name, ws.title, c.coordinate)))
                         continue
                     it = {"key": f"eap:{code}", "code": code, "name": name, "flags": []}
                     if multi:
-                        it["flags"].append(flag("info", f"Lido de uma célula que reúne vários itens ({ws.title}!{c.coordinate})."))
+                        it["flags"].append(flag("info", _t("Lido de uma célula que reúne vários itens ({0}!{1}).", ws.title, c.coordinate)))
                     seen[code] = it
                     items.append(it)
     items.sort(key=lambda x: tuple(int(p) for p in x["code"].split(".")))
@@ -412,12 +412,12 @@ def read_wbs(wb, year, today):
         parts = it["code"].split(".")
         it["parent_code"] = ".".join(parts[:-1]) if len(parts) > 1 else None
         if it["parent_code"] and it["parent_code"] not in seen:
-            it["flags"].append(flag("revisar", f"Elemento superior {it['parent_code']} não encontrado — importado no nível raiz."))
+            it["flags"].append(flag("revisar", _t("Elemento superior {0} não encontrado — importado no nível raiz.", it['parent_code'])))
             it["parent_code"] = None
         top = seen.get(".".join(parts[:2])) if len(parts) >= 2 else None
         it["area"] = area_of(top["name"]) if top else None
     if dup:
-        notes.append(flag("info", f"{dup} célula(s) repetiam itens já lidos (mesmo código e nome), inclusive na segunda aba: contadas como duplicadas e ignoradas."))
+        notes.append(flag("info", _t("{0} célula(s) repetiam itens já lidos (mesmo código e nome), inclusive na segunda aba: contadas como duplicadas e ignoradas.", dup)))
     return {"wbs": items, "notes": notes, "signature": hashlib.sha256(json.dumps([(i["code"], i["name"]) for i in items]).encode()).hexdigest()}
 
 
@@ -426,7 +426,7 @@ def read_budget(wb, year, today):
     sh = Sheet(ws)
     header = next((r for r in range(1, 30) if "custos do projeto" in norm(sh.s(r, 2))), None)
     if not header:
-        return {"expenses": [], "notes": [flag("revisar", "Tabela de custos não encontrada.")]}
+        return {"expenses": [], "notes": [flag("revisar", _t("Tabela de custos não encontrada."))]}
     cmap = {}
     for c in range(2, 21):
         t = norm(sh.s(header, c))
@@ -473,18 +473,18 @@ def read_budget(wb, year, today):
                 mq = re.match(r"^\s*([\d\.,]+)\s*(.*)$", qraw)
                 qty, unit_label = (float(mq.group(1).replace(",", ".")), mq.group(2).strip() or None) if mq else (None, re.sub(r"^[xX]\s*", "", qraw).strip() or None)
                 if qty is None and qraw:
-                    flags.append(flag("info", f"Quantidade não definida na planilha (“{qraw}”)."))
+                    flags.append(flag("info", _t("Quantidade não definida na planilha (“{0}”).", qraw)))
                 cost = sh.v(r, cmap.get("cost", 15))
                 cost = float(cost) if isinstance(cost, (int, float)) else None
                 sponsored = norm(sh.s(r, cmap.get("sponsored", 18))) == "sim"
                 if qty is not None and cost is not None and abs(qty * float(unit) - cost) > 0.009:
-                    flags.append(flag("revisar", f"Preço unitário × quantidade ({float(unit):.2f} × {qty:g} = {qty * float(unit):.2f}) é diferente do custo informado ({cost:.2f}). Os valores foram importados como estão."))
+                    flags.append(flag("revisar", _t("Preço unitário × quantidade ({0} × {1} = {2}) é diferente do custo informado ({3}). Os valores foram importados como estão.", format(float(unit), '.2f'), format(qty, 'g'), format(qty * float(unit), '.2f'), format(cost, '.2f'))))
                 sponsor = None
                 ms = re.search(r"\(([^)]+)\)", name)
                 if ms and sponsored:
                     sponsor = ms.group(1).strip()
                 if sponsored and not cost:
-                    flags.append(flag("info", "Item obtido por patrocínio sem valor estimado: o apoio não entra nos totais até que um valor seja informado."))
+                    flags.append(flag("info", _t("Item obtido por patrocínio sem valor estimado: o apoio não entra nos totais até que um valor seja informado.")))
                 actual = None
                 if rmap.get("cost"):
                     av = sh.v(r, rmap["cost"])
@@ -504,12 +504,11 @@ def read_budget(wb, year, today):
                         break
     checks = []
     for a, tot in totals.items():
-        checks.append({"check": f"Total estimado — {a}", "expected": tot, "actual": sums.get(a, 0), "ok": abs(tot - sums.get(a, 0)) < 0.01})
+        checks.append({"check": _t("Total estimado — {0}", a), "expected": tot, "actual": sums.get(a, 0), "ok": abs(tot - sums.get(a, 0)) < 0.01})
     if right and not any(i["total_actual"] is not None for i in items):
-        notes.append(flag("info", "A tabela “Controle orçamentário final” está sem valores: nenhum valor realizado foi importado."))
+        notes.append(flag("info", _t("A tabela “Controle orçamentário final” está sem valores: nenhum valor realizado foi importado.")))
     if summary.get("raised"):
-        notes.append(flag("revisar", f"A planilha indica R$ {summary['raised']:.2f} já arrecadados, sem data nem comprovante. O valor NÃO foi lançado no caixa: "
-                                     "registre o recebimento na receita correspondente quando confirmar que o dinheiro entrou."))
+        notes.append(flag("revisar", _t("A planilha indica R$ {0} já arrecadados, sem data nem comprovante. O valor NÃO foi lançado no caixa: registre o recebimento na receita correspondente quando confirmar que o dinheiro entrou.", format(summary['raised'], '.2f'))))
     return {"expenses": items, "budget": summary, "checks": checks, "notes": notes}
 
 
@@ -517,7 +516,7 @@ def read_stakeholders(wb, year, today):
     sh = Sheet(wb.worksheets[0])
     header = next((r for r in range(1, 30) if "patrocinadores" in norm(sh.s(r, 2))), None)
     if not header:
-        return {"stakeholders": [], "notes": [flag("revisar", "Tabela de stakeholders não encontrada.")]}
+        return {"stakeholders": [], "notes": [flag("revisar", _t("Tabela de stakeholders não encontrada."))]}
     items = []
     for r in range(header + 1, sh.rows + 1):
         name = re.sub(r"\s+", " ", sh.s(r, 2))
@@ -528,14 +527,14 @@ def read_stakeholders(wb, year, today):
         amount = float(val) if isinstance(val, (int, float)) else None
         status = "confirmado" if conf == "sim" else "recusado" if conf in ("nao", "não") else "prospectado"
         if not need and amount is None and not conf:
-            flags.append(flag("revisar", "Registro apenas com o nome na planilha: complete os dados ou exclua."))
+            flags.append(flag("revisar", _t("Registro apenas com o nome na planilha: complete os dados ou exclua.")))
         elif not conf:
-            flags.append(flag("revisar", "Sem resposta de confirmação na planilha: importado como prospectado."))
+            flags.append(flag("revisar", _t("Sem resposta de confirmação na planilha: importado como prospectado.")))
         if amount is not None and status == "confirmado":
-            flags.append(flag("revisar", f"Valor confirmado de R$ {amount:.2f}: foi criada uma receita “a receber”. Registre o recebimento com a data real se o dinheiro já entrou."))
+            flags.append(flag("revisar", _t("Valor confirmado de R$ {0}: foi criada uma receita “a receber”. Registre o recebimento com a data real se o dinheiro já entrou.", format(amount, '.2f'))))
         items.append({"key": f"stakeholder:{norm(name)}", "name": name, "need": need, "confirmed": amount if status == "confirmado" else None,
-                      "requested": None, "status": status, "contribution_type": "Financeira" if amount is not None else None, "flags": flags})
-    return {"stakeholders": items, "notes": [flag("info", "“Confirmação = SIM” foi importada como negociação confirmada. Valores com traços (“-----”) ficaram em branco.")]}
+                      "requested": None, "status": status, "contribution_type": _t("Financeira") if amount is not None else None, "flags": flags})
+    return {"stakeholders": items, "notes": [flag("info", _t("“Confirmação = SIM” foi importada como negociação confirmada. Valores com traços (“-----”) ficaram em branco."))]}
 
 
 def read_scope(wb, year, today):
@@ -572,8 +571,8 @@ def read_scope(wb, year, today):
                     if p:
                         data["deliverables"].append({"text": p[0].upper() + p[1:], "area": area_of(label), "main": False})
     if not data.get("project_name"):
-        flags.append(flag("revisar", "Nome do projeto não encontrado."))
-    flags.append(flag("info", "A planilha não traz: objetivos específicos, justificativa, premissas, restrições, exclusões e critérios de aceitação — esses campos ficam em branco para a equipe preencher."))
+        flags.append(flag("revisar", _t("Nome do projeto não encontrado.")))
+    flags.append(flag("info", _t("A planilha não traz: objetivos específicos, justificativa, premissas, restrições, exclusões e critérios de aceitação — esses campos ficam em branco para a equipe preencher.")))
     return {"scope": {"key": "escopo", "data": data, "flags": flags}, "notes": []}
 
 
@@ -595,15 +594,15 @@ def read_evidence(wb, year, today):
                 if t:
                     entries.append({"week": wk, "area": area_of(label), "text": t})
     if not month:
-        return {"evidence": None, "notes": [flag("revisar", "Mês de referência não encontrado na planilha de evidências.")]}
+        return {"evidence": None, "notes": [flag("revisar", _t("Mês de referência não encontrado na planilha de evidências."))]}
     weeks = []
     for wk in sorted(set(week_cols.values())):
         es = [e for e in entries if e["week"] == wk]
         weeks.append({"key": f"evidencia:{year}-{month:02d}:{wk}", "month": f"{year}-{month:02d}", "week_number": wk, "entries": es,
-                      "flags": [flag("revisar", "A planilha não informa as datas de início e término da semana nem o responsável pelo acompanhamento.")] +
-                               ([flag("info", f"Apenas {len(es)} área(s) têm registro nesta semana.")] if 0 < len(es) < 4 else []) +
-                               ([flag("info", "Semana sem nenhum registro na planilha — não será criada.")] if not es else [])})
-    notes.append(flag("info", f"O ano do mês de referência não consta na planilha; foi usado o ano da temporada ({year}). Os textos foram importados no campo “Atividades realizadas”."))
+                      "flags": [flag("revisar", _t("A planilha não informa as datas de início e término da semana nem o responsável pelo acompanhamento."))] +
+                               ([flag("info", _t("Apenas {0} área(s) têm registro nesta semana.", len(es)))] if 0 < len(es) < 4 else []) +
+                               ([flag("info", _t("Semana sem nenhum registro na planilha — não será criada."))] if not es else [])})
+    notes.append(flag("info", _t("O ano do mês de referência não consta na planilha; foi usado o ano da temporada ({0}). Os textos foram importados no campo “Atividades realizadas”.", year)))
     return {"evidence": {"weeks": weeks}, "notes": notes}
 
 
@@ -678,7 +677,7 @@ def build_staging(db, season, uploads):
                 a["merge_into"] = match["key"]
                 a["merge_title"] = f"{match['seq']}. {match['title']}"
                 a["action"] = "mesclar"
-                a["flags"].append(flag("revisar", f"Parece ser a mesma entrega do cronograma “{match['seq']}. {match['title']}”. Padrão: mesclar (não cria atividade nova)."))
+                a["flags"].append(flag("revisar", _t("Parece ser a mesma entrega do cronograma “{0}. {1}”. Padrão: mesclar (não cria atividade nova).", match['seq'], match['title'])))
     # marca o que já existe no banco (reimportação não duplica)
     existing = {
         "activities": {r["source"] for r in db.q("SELECT source FROM activities WHERE season_id=? AND source IS NOT NULL AND deleted_at IS NULL", (season["id"],))},
@@ -694,7 +693,7 @@ def build_staging(db, season, uploads):
         m = next((u for u in users if tokens(u["name"]) == tokens(p["name"]) or (len(tokens(u["name"])) >= 2 and (tokens(u["name"]) <= tokens(p["name"]) or tokens(p["name"]) <= tokens(u["name"])))), None)
         if m:
             p["match_user_id"], p["exists"] = m["id"], True
-            p["flags"].append(flag("info", f"Já existe o usuário “{m['name']}”: será vinculado (não duplica)."))
+            p["flags"].append(flag("info", _t("Já existe o usuário “{0}”: será vinculado (não duplica).", m['name'])))
     for sec in ("wbs", "risks", "expenses", "stakeholders", "evidence"):
         for it in st[sec]:
             it.setdefault("action", "importar")
@@ -710,20 +709,20 @@ def build_staging(db, season, uploads):
         st["scope"]["action"] = "importar"
         if db.one("SELECT 1 FROM scopes WHERE season_id=?", (season["id"],)):
             st["scope"]["exists"] = True
-            st["scope"]["flags"].append(flag("info", "Já existe um escopo nesta temporada: o da planilha não substituirá o atual."))
+            st["scope"]["flags"].append(flag("info", _t("Já existe um escopo nesta temporada: o da planilha não substituirá o atual.")))
     # conferências cruzadas
     conf_total = round(sum(s["confirmed"] or 0 for s in st["stakeholders"]), 2)
     if st["budget"].get("raised") is not None and st["stakeholders"]:
-        st["checks"].append({"check": "Valor já arrecadado (orçamento) × soma dos valores confirmados (stakeholders)", "expected": st["budget"]["raised"], "actual": conf_total,
+        st["checks"].append({"check": _t("Valor já arrecadado (orçamento) × soma dos valores confirmados (stakeholders)"), "expected": st["budget"]["raised"], "actual": conf_total,
                              "ok": abs(st["budget"]["raised"] - conf_total) < 0.01})
     if {"goal", "raised", "remaining"} <= set(st["budget"]):
         b = st["budget"]
-        st["checks"].append({"check": "Valor restante = valor a arrecadar − valor já arrecadado", "expected": round(b["goal"] - b["raised"], 2), "actual": b["remaining"],
+        st["checks"].append({"check": _t("Valor restante = valor a arrecadar − valor já arrecadado"), "expected": round(b["goal"] - b["raised"], 2), "actual": b["remaining"],
                              "ok": abs(b["goal"] - b["raised"] - b["remaining"]) < 0.01})
     names = {norm(s["name"]) for s in st["stakeholders"]} | {norm(r["name"]) for r in db.q("SELECT name FROM stakeholders WHERE season_id=? AND deleted_at IS NULL", (season["id"],))}
     for e in st["expenses"]:
         if e.get("sponsor_name") and norm(e["sponsor_name"]) not in names:
-            e["flags"].append(flag("revisar", f"Patrocinador “{e['sponsor_name']}” não encontrado na lista de stakeholders: item importado sem vínculo."))
+            e["flags"].append(flag("revisar", _t("Patrocinador “{0}” não encontrado na lista de stakeholders: item importado sem vínculo.", e['sponsor_name'])))
     st["summary"] = summarize(st)
     return st
 
@@ -744,11 +743,11 @@ def summarize(st):
                     "revisar": sum(1 for i in items if _needs_review(i) and i.get("action") != "ignorar" and not i.get("exists"))}
     if st.get("scope"):
         s = st["scope"]
-        out["scope"] = {"label": "Escopo", "total": 1, "importar": int(s.get("action") == "importar" and not s.get("exists")), "mesclar": 0,
+        out["scope"] = {"label": _t("Escopo"), "total": 1, "importar": int(s.get("action") == "importar" and not s.get("exists")), "mesclar": 0,
                         "ignorar": int(s.get("action") == "ignorar"), "duplicados": int(bool(s.get("exists"))), "revisar": 0}
-    out["dependencies"] = {"label": "Dependências do cronograma", "total": sum(len(a["deps"]) for a in st["activities"] if a.get("action") == "importar")}
-    out["raci"] = {"label": "Atribuições RACI", "total": sum(len(a.get("raci") or {}) for a in st["activities"] if a.get("action") == "importar")}
-    out["evidence_entries"] = {"label": "Registros de evidência por área", "total": sum(len(w["entries"]) for w in st["evidence"] if w.get("action") == "importar")}
+    out["dependencies"] = {"label": _t("Dependências do cronograma"), "total": sum(len(a["deps"]) for a in st["activities"] if a.get("action") == "importar")}
+    out["raci"] = {"label": _t("Atribuições RACI"), "total": sum(len(a.get("raci") or {}) for a in st["activities"] if a.get("action") == "importar")}
+    out["evidence_entries"] = {"label": _t("Registros de evidência por área"), "total": sum(len(w["entries"]) for w in st["evidence"] if w.get("action") == "importar")}
     return out
 
 
@@ -876,7 +875,7 @@ def apply_import(ctx, imp, st):
             continue
         if a.get("action") == "mesclar" and a.get("merge_into") and amap.get(a["merge_into"]):
             tgt = amap[a["merge_into"]]
-            extra = f"Planejamento de gestão — prazo: {fmt_date(a['planned_end'])}." if a.get("planned_end") else None
+            extra = _t("Planejamento de gestão — prazo: {0}.", fmt_date(a['planned_end'])) if a.get("planned_end") else None
             if extra:
                 db.ex("UPDATE activities SET description=COALESCE(description, ?), notes=CASE WHEN notes IS NULL OR notes='' THEN ? ELSE notes || ? END, updated_at=? WHERE id=?",
                       (a.get("description"), extra, "\n" + extra, ts, tgt))
@@ -987,20 +986,20 @@ def apply_import(ctx, imp, st):
     def chk(label, expected, actual):
         checks.append({"check": label, "expected": expected, "actual": actual, "ok": expected == actual})
     exp_acts = sum(1 for a in st["activities"] if a.get("action") == "importar" and not a.get("exists"))
-    chk("Atividades gravadas × previstas na revisão", exp_acts, res["activities"]["importados"])
-    chk("Elementos da EAP gravados × previstos", sum(1 for w in st["wbs"] if w.get("action") == "importar" and not w.get("exists")), res["wbs"]["importados"])
+    chk(_t("Atividades gravadas × previstas na revisão"), exp_acts, res["activities"]["importados"])
+    chk(_t("Elementos da EAP gravados × previstos"), sum(1 for w in st["wbs"] if w.get("action") == "importar" and not w.get("exists")), res["wbs"]["importados"])
     orphans = db.val("SELECT COUNT(*) FROM wbs_elements w WHERE w.season_id=? AND w.deleted_at IS NULL AND w.parent_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wbs_elements p WHERE p.id=w.parent_id AND p.deleted_at IS NULL)", (sid,))
-    chk("Elementos da EAP com elemento superior inexistente", 0, orphans)
+    chk(_t("Elementos da EAP com elemento superior inexistente"), 0, orphans)
     exp_deps = sum(len(a["deps"]) for a in st["activities"] if a["origin"] == "gantt" and a.get("action") == "importar" and not a.get("exists"))
-    chk("Dependências gravadas × lidas da planilha", exp_deps, res["dependencies"]["importados"] + res["dependencies"]["duplicados"] + res["dependencies"]["ignorados"])
-    chk("Dependências não importadas", 0, res["dependencies"]["ignorados"])
+    chk(_t("Dependências gravadas × lidas da planilha"), exp_deps, res["dependencies"]["importados"] + res["dependencies"]["duplicados"] + res["dependencies"]["ignorados"])
+    chk(_t("Dependências não importadas"), 0, res["dependencies"]["ignorados"])
     exp_raci = sum(len([k for k in (a.get("raci") or {}) if k in pmap]) for a in st["activities"] if a.get("action") == "importar" and not a.get("exists"))
-    chk("Atribuições RACI gravadas × lidas", exp_raci, res["raci"]["importados"])
+    chk(_t("Atribuições RACI gravadas × lidas"), exp_raci, res["raci"]["importados"])
     multi_a = db.val("SELECT COUNT(*) FROM (SELECT activity_id FROM raci r JOIN activities a ON a.id=r.activity_id WHERE a.season_id=? AND r.role='A' GROUP BY activity_id HAVING COUNT(*)>1)", (sid,))
-    chk("Atividades com mais de um aprovador", 0, multi_a)
+    chk(_t("Atividades com mais de um aprovador"), 0, multi_a)
     teacher_a = db.val("SELECT COUNT(*) FROM raci r JOIN users u ON u.id=r.user_id JOIN activities a ON a.id=r.activity_id WHERE a.season_id=? AND r.role='A' AND u.is_teacher=1", (sid,))
-    chk("Aprovações atribuídas ao professor técnico", 0, teacher_a)
-    chk("Movimentos de caixa criados pela importação (nada é lançado como pago/recebido sem comprovação)", 0,
+    chk(_t("Aprovações atribuídas ao professor técnico"), 0, teacher_a)
+    chk(_t("Movimentos de caixa criados pela importação (nada é lançado como pago/recebido sem comprovação)"), 0,
         db.val("SELECT COUNT(*) FROM movements WHERE season_id=? AND created_at >= ?", (sid, ts)))
     return res, checks
 
@@ -1019,12 +1018,12 @@ def create_import(ctx, season_id, uploads):
     db = ctx.db
     season = db.one("SELECT * FROM seasons WHERE id=? AND deleted_at IS NULL", (season_id,))
     if not season:
-        raise bad("Selecione a temporada de destino.")
+        raise bad(_t("Selecione a temporada de destino."))
     if not uploads:
-        raise bad("Envie ao menos uma planilha (.xlsx).")
+        raise bad(_t("Envie ao menos uma planilha (.xlsx)."))
     for up in uploads:
         if not up["name"].lower().endswith(".xlsx") or not up["data"].startswith(b"PK"):
-            raise bad(f"“{up['name']}” não é uma planilha .xlsx válida.")
+            raise bad(_t("“{0}” não é uma planilha .xlsx válida.", up['name']))
     st = build_staging(db, season, uploads)
     iid = new_id()
     files = []
@@ -1039,7 +1038,7 @@ def create_import(ctx, season_id, uploads):
         files.append({**info, "file_id": fid})
     db.insert("imports", {"id": iid, "created_by": ctx.uid, "created_at": now_iso(), "status": "em_revisao", "season_id": season_id,
                           "files": json.dumps(files, ensure_ascii=False), "staging": json.dumps(st, ensure_ascii=False)})
-    audit(ctx, "importar_planilhas", "imports", iid, f"{len(uploads)} planilha(s) lida(s) para revisão")
+    audit(ctx, "importar_planilhas", "imports", iid, _t("{0} planilha(s) lida(s) para revisão", len(uploads)))
     return _ser_import(db.one("SELECT * FROM imports WHERE id=?", (iid,)))
 
 
@@ -1052,10 +1051,10 @@ def upload_import_file(ctx):
     Depois, POST /api/imports com {season_id, file_ids} lê todas juntas."""
     import hashlib
     if len(ctx.files) != 1:
-        raise bad("Envie uma planilha por vez.")
+        raise bad(_t("Envie uma planilha por vez."))
     f = ctx.files[0]
     if not f["name"].lower().endswith(".xlsx") or not f["data"].startswith(b"PK"):
-        raise bad(f"“{f['name']}” não é uma planilha .xlsx válida.")
+        raise bad(_t("“{0}” não é uma planilha .xlsx válida.", f['name']))
     fid = new_id()
     ctx.db.insert("files", {"id": fid, "entity_type": "import_draft", "entity_id": ctx.uid, "name": f["name"][:180], "mime": XLSX_MIME, "size": len(f["data"]),
                             "sha256": hashlib.sha256(f["data"]).hexdigest(), "data": f["data"], "judge_visible": 0, "uploaded_by": ctx.uid, "created_at": now_iso()})
@@ -1067,12 +1066,12 @@ def upload_import(ctx):
     ids = ctx.body.get("file_ids")
     if ids:
         if not isinstance(ids, list) or len(ids) > 40 or not all(isinstance(x, str) for x in ids):
-            raise bad("Lista de arquivos inválida.")
+            raise bad(_t("Lista de arquivos inválida."))
         ups = []
         for fid in ids:
             row = ctx.db.one("SELECT id, name, data FROM files WHERE id=? AND entity_type='import_draft' AND uploaded_by=? AND deleted_at IS NULL", (fid, ctx.uid))
             if not row:
-                raise bad("Um dos arquivos enviados não foi encontrado. Envie as planilhas novamente.")
+                raise bad(_t("Um dos arquivos enviados não foi encontrado. Envie as planilhas novamente."))
             ups.append({"name": row["name"], "data": bytes(row["data"]), "file_id": row["id"]})
         return create_import(ctx, ctx.body.get("season_id"), ups)
     return create_import(ctx, ctx.body.get("season_id"), [{"name": f["name"], "data": f["data"]} for f in ctx.files])
@@ -1087,7 +1086,7 @@ def list_imports(ctx):
 def get_import(ctx):
     i = ctx.db.one("SELECT * FROM imports WHERE id=?", (ctx.params["id"],))
     if not i:
-        raise not_found("Importação")
+        raise not_found(_t("Importação"))
     return _ser_import(i)
 
 
@@ -1096,9 +1095,9 @@ def update_import(ctx):
     """Ajusta as decisões da revisão: {decisions: {chave_do_item: 'importar'|'ignorar'|'mesclar'}}."""
     i = ctx.db.one("SELECT * FROM imports WHERE id=?", (ctx.params["id"],))
     if not i:
-        raise not_found("Importação")
+        raise not_found(_t("Importação"))
     if i["status"] != "em_revisao":
-        raise conflict("Esta importação já foi finalizada.")
+        raise conflict(_t("Esta importação já foi finalizada."))
     st = json.loads(i["staging"])
     dec = ctx.body.get("decisions") or {}
     for sec in ("people", "wbs", "activities", "risks", "expenses", "stakeholders", "evidence"):
@@ -1106,7 +1105,7 @@ def update_import(ctx):
             if it["key"] in dec:
                 d_ = dec[it["key"]]
                 if d_ not in ("importar", "ignorar", "mesclar") or (d_ == "mesclar" and not it.get("merge_into")):
-                    raise bad("Decisão inválida para um dos itens.")
+                    raise bad(_t("Decisão inválida para um dos itens."))
                 it["action"] = d_
     if st.get("scope") and "escopo" in dec and dec["escopo"] in ("importar", "ignorar"):
         st["scope"]["action"] = dec["escopo"]
@@ -1119,15 +1118,15 @@ def confirm(ctx, import_id):
     db = ctx.db
     i = db.one("SELECT * FROM imports WHERE id=?", (import_id,))
     if not i:
-        raise not_found("Importação")
+        raise not_found(_t("Importação"))
     if i["status"] != "em_revisao":
-        raise conflict("Esta importação já foi finalizada.")
+        raise conflict(_t("Esta importação já foi finalizada."))
     st = json.loads(i["staging"])
     res, checks = apply_import(ctx, i, st)
-    summary = {"result": res, "checks": checks, "labels": {**SECTION_LABEL, "dependencies": "Dependências", "raci": "Atribuições RACI", "evidence_entries": "Registros de evidência"}}
+    summary = {"result": res, "checks": checks, "labels": {**SECTION_LABEL, "dependencies": _t("Dependências"), "raci": _t("Atribuições RACI"), "evidence_entries": _t("Registros de evidência")}}
     db.ex("UPDATE imports SET status='confirmada', confirmed_at=?, summary=? WHERE id=?", (now_iso(), json.dumps(summary, ensure_ascii=False), i["id"]))
     total = sum(v["importados"] for v in res.values())
-    audit(ctx, "confirmar_importacao", "imports", i["id"], f"Importação confirmada: {total} registro(s) gravado(s)", after={k: v for k, v in res.items()})
+    audit(ctx, "confirmar_importacao", "imports", i["id"], _t("Importação confirmada: {0} registro(s) gravado(s)", total), after={k: v for k, v in res.items()})
     return _ser_import(db.one("SELECT * FROM imports WHERE id=?", (i["id"],)))
 
 
@@ -1140,9 +1139,9 @@ def confirm_import(ctx):
 def discard_import(ctx):
     i = ctx.db.one("SELECT * FROM imports WHERE id=?", (ctx.params["id"],))
     if not i:
-        raise not_found("Importação")
+        raise not_found(_t("Importação"))
     if i["status"] != "em_revisao":
-        raise conflict("Esta importação já foi finalizada.")
+        raise conflict(_t("Esta importação já foi finalizada."))
     ctx.db.ex("UPDATE imports SET status='descartada' WHERE id=?", (i["id"],))
-    audit(ctx, "descartar_importacao", "imports", i["id"], "Importação descartada (os arquivos originais foram mantidos)")
+    audit(ctx, "descartar_importacao", "imports", i["id"], _t("Importação descartada (os arquivos originais foram mantidos)"))
     return {"ok": True}

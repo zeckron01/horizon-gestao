@@ -1,4 +1,5 @@
 """Dashboard estratégico: todos os números são calculados dos registros do banco, respeitando os filtros."""
+from ..i18n import _t
 from ..core import INTERNAL, add_days, bad, get_setting, judge_module_guard, judge_view, route, today_local, user_names
 from .activities import ACT, STATUS_LABEL, critical_path, expand_activities, load_graph
 from .evidences import evidence_indicators
@@ -43,7 +44,7 @@ def dashboard(ctx):
     db, q = ctx.db, ctx.query
     sid = q.get("season_id")
     if not sid:
-        raise bad("Informe a temporada.")
+        raise bad(_t("Informe a temporada."))
     today = today_local(db)
     acts, f, t = filtered_activities(db, q)
     live = [a for a in acts if a["status"] != "cancelada"]
@@ -71,9 +72,9 @@ def dashboard(ctx):
         "no_owner": sum(1 for a in open_ if not a["owner_id"]),
     }
     status_chart = [{"key": k, "label": STATUS_LABEL[k], "value": sum(1 for a in live if a["status"] == k and not a["is_late"])} for k in STATUS_LABEL if k != "cancelada"]
-    status_chart.append({"key": "atrasada", "label": "Atrasadas (não concluídas)", "value": len(late)})
+    status_chart.append({"key": "atrasada", "label": _t("Atrasadas (não concluídas)"), "value": len(late)})
     by_area = []
-    for ar in areas + [{"id": None, "name": "(sem área)", "color": "#94a3b8"}]:
+    for ar in areas + [{"id": None, "name": _t("(sem área)"), "color": "#94a3b8"}]:
         xs = [a for a in live if a["area_id"] == ar["id"]]
         if not xs:
             continue

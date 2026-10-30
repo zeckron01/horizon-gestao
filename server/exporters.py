@@ -1,4 +1,5 @@
 """Renderização de relatórios em PDF (reportlab), Excel (openpyxl) e Word (python-docx) a partir de um modelo único."""
+from .i18n import fmt_num_l, tr_now as _t
 import io
 from pathlib import Path
 
@@ -14,9 +15,9 @@ def cell_text(v):
     if v is None or v == "":
         return "—"
     if isinstance(v, bool):
-        return "Sim" if v else "Não"
+        return _t("Sim") if v else _t("Não")
     if isinstance(v, float):
-        return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return fmt_num_l(v, 2)
     return str(v)
 
 
@@ -46,14 +47,14 @@ def to_pdf(doc, logo=None):
     def P(text, st=base):
         return Paragraph(escape(cell_text(text)).replace("\n", "<br/>"), st)
 
-    footer_text = f"{doc.get('team', '')} — {doc['title']} — gerado em {doc['generated_at']} — Fonte: {doc['source']}"
+    footer_text = _t("{0} — {1} — gerado em {2} — Fonte: {3}", doc.get('team', ''), doc['title'], doc['generated_at'], doc['source'])
 
     def on_page(canvas, d_):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(colors.HexColor("#64748b"))
         canvas.drawString(15 * mm, 9 * mm, footer_text[:170])
-        canvas.drawRightString(page[0] - 15 * mm, 9 * mm, f"Página {canvas.getPageNumber()}")
+        canvas.drawRightString(page[0] - 15 * mm, 9 * mm, _t("Página {0}", canvas.getPageNumber()))
         canvas.setStrokeColor(primary)
         canvas.setLineWidth(1.2)
         canvas.line(15 * mm, page[1] - 12 * mm, page[0] - 15 * mm, page[1] - 12 * mm)
@@ -114,8 +115,8 @@ def to_pdf(doc, logo=None):
     if doc.get("subtitle"):
         flow.append(P(doc["subtitle"], center))
     flow.append(Spacer(1, 8 * mm))
-    meta = [["Temporada", doc.get("season", "—")], ["Período de referência", doc.get("period_label", "—")], ["Data de geração", doc["generated_at"]],
-            ["Gerado por", doc.get("generated_by", "—")], ["Origem dos dados", doc["source"]]] + [[k, v] for k, v in doc.get("filters", [])]
+    meta = [[_t("Temporada"), doc.get("season", "—")], [_t("Período de referência"), doc.get("period_label", "—")], [_t("Data de geração"), doc["generated_at"]],
+            [_t("Gerado por"), doc.get("generated_by", "—")], [_t("Origem dos dados"), doc["source"]]] + [[k, v] for k, v in doc.get("filters", [])]
     t = Table([[P(a, small), P(b, small)] for a, b in meta], colWidths=[45 * mm, 95 * mm], hAlign="CENTER")
     t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")), ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f1f5f9")),
                            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
@@ -135,7 +136,7 @@ def to_pdf(doc, logo=None):
         tb = sec.get("table")
         if tb:
             if not tb["rows"]:
-                flow.append(P(tb.get("empty", "Nenhum registro no período e filtros selecionados."), note))
+                flow.append(P(tb.get("empty", _t("Nenhum registro no período e filtros selecionados.")), note))
             else:
                 n = len(tb["columns"])
                 w = tb.get("widths") or [1] * n
@@ -163,20 +164,20 @@ def to_xlsx(doc):
     from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
-    ws.title = "Resumo"
+    ws.title = _t("Resumo")
     color = (doc.get("primary") or "#147d14").lstrip("#").upper()
     head_fill = PatternFill("solid", fgColor=color)
     ws["A1"] = doc["title"]
     ws["A1"].font = Font(bold=True, size=14)
-    meta = [("Equipe", doc.get("team")), ("Temporada", doc.get("season")), ("Período de referência", doc.get("period_label")),
-            ("Data de geração", doc["generated_at"]), ("Gerado por", doc.get("generated_by")), ("Origem dos dados", doc["source"])] + list(doc.get("filters", []))
+    meta = [(_t("Equipe"), doc.get("team")), (_t("Temporada"), doc.get("season")), (_t("Período de referência"), doc.get("period_label")),
+            (_t("Data de geração"), doc["generated_at"]), (_t("Gerado por"), doc.get("generated_by")), (_t("Origem dos dados"), doc["source"])] + list(doc.get("filters", []))
     r = 3
     for k, v in meta:
         ws.cell(r, 1, k).font = Font(bold=True)
         ws.cell(r, 2, v)
         r += 1
     r += 1
-    used = {"Resumo"}
+    used = {_t("Resumo")}
     for sec in doc["sections"]:
         ws.cell(r, 1, sec["heading"]).font = Font(bold=True, size=12, color=color)
         r += 1
@@ -193,7 +194,7 @@ def to_xlsx(doc):
             r += 1
         tb = sec.get("table")
         if tb:
-            name = "".join(ch for ch in sec["heading"] if ch not in '[]:*?/\\')[:28] or "Dados"
+            name = "".join(ch for ch in sec["heading"] if ch not in '[]:*?/\\')[:28] or _t("Dados")
             base, i = name, 2
             while name in used:
                 name = f"{base[:25]} {i}"
@@ -209,7 +210,7 @@ def to_xlsx(doc):
             for ri, row in enumerate(tb["rows"], 2):
                 for ci, v in enumerate(row, 1):
                     if isinstance(v, bool):
-                        v = "Sim" if v else "Não"
+                        v = _t("Sim") if v else _t("Não")
                     c = sh.cell(ri, ci, v if isinstance(v, (int, float)) else (None if v in (None, "") else str(v)))
                     if isinstance(v, float):
                         c.number_format = '#,##0.00'
@@ -220,7 +221,7 @@ def to_xlsx(doc):
             sh.freeze_panes = "A2"
             if tb["rows"]:
                 sh.auto_filter.ref = sh.dimensions
-            ws.cell(r, 1, f"Ver aba “{name}” ({len(tb['rows'])} linha(s)).").font = Font(italic=True, color="64748B")
+            ws.cell(r, 1, _t("Ver aba “{0}” ({1} linha(s)).", name, len(tb['rows']))).font = Font(italic=True, color="64748B")
             r += 1
         if sec.get("note"):
             ws.cell(r, 1, sec["note"]).font = Font(italic=True, color="64748B")
@@ -259,8 +260,8 @@ def to_docx(doc, logo=None):
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p = d.add_paragraph(doc.get("team", ""))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta = [("Temporada", doc.get("season")), ("Período de referência", doc.get("period_label")), ("Data de geração", doc["generated_at"]),
-            ("Gerado por", doc.get("generated_by")), ("Origem dos dados", doc["source"])] + list(doc.get("filters", []))
+    meta = [(_t("Temporada"), doc.get("season")), (_t("Período de referência"), doc.get("period_label")), (_t("Data de geração"), doc["generated_at"]),
+            (_t("Gerado por"), doc.get("generated_by")), (_t("Origem dos dados"), doc["source"])] + list(doc.get("filters", []))
     tb = d.add_table(rows=0, cols=2)
     tb.style = "Light Grid Accent 1"
     for k, v in meta:
@@ -282,7 +283,7 @@ def to_docx(doc, logo=None):
         t_ = sec.get("table")
         if t_:
             if not t_["rows"]:
-                d.add_paragraph(t_.get("empty", "Nenhum registro no período e filtros selecionados.")).italic = True
+                d.add_paragraph(t_.get("empty", _t("Nenhum registro no período e filtros selecionados."))).italic = True
             else:
                 tb = d.add_table(rows=1, cols=len(t_["columns"]))
                 tb.style = "Light Grid Accent 1"
@@ -303,7 +304,7 @@ def to_docx(doc, logo=None):
                 run.italic = True
                 run.font.size = Pt(8.5)
     foot = sec0.footer.paragraphs[0]
-    foot.text = f"{doc.get('team', '')} — {doc['title']} — gerado em {doc['generated_at']} — Fonte: {doc['source']}"
+    foot.text = _t("{0} — {1} — gerado em {2} — Fonte: {3}", doc.get('team', ''), doc['title'], doc['generated_at'], doc['source'])
     for run in foot.runs:
         run.font.size = Pt(7.5)
     buf = io.BytesIO()

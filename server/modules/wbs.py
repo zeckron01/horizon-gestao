@@ -1,35 +1,36 @@
 """Estrutura Analítica do Projeto (EAP): árvore com códigos hierárquicos automáticos e progresso consolidado."""
+from ..i18n import _t, rnd
 from ..core import F, Resource, audit, bad, check_order, conflict, from_cents, judge_module_guard, not_found, route
 from ..db import now_iso
 
 
 class Wbs(Resource):
     def validate(self, ctx, w, old):
-        check_order(w, "start_date", "end_date", "Início", "Término")
+        check_order(w, "start_date", "end_date", _t("Início"), _t("Término"))
         if w.get("parent_id"):
             p = ctx.db.one("SELECT season_id FROM wbs_elements WHERE id=? AND deleted_at IS NULL", (w["parent_id"],))
             if not p or p["season_id"] != w["season_id"]:
-                raise bad("O elemento superior pertence a outra temporada.")
+                raise bad(_t("O elemento superior pertence a outra temporada."))
             if old and is_descendant(ctx.db, w["parent_id"], old["id"]):
-                raise bad("Um elemento não pode ser movido para dentro de si mesmo.")
+                raise bad(_t("Um elemento não pode ser movido para dentro de si mesmo."))
         if not old and not w.get("sort"):
             w["sort"] = (ctx.db.val("SELECT COALESCE(MAX(sort),0) FROM wbs_elements WHERE season_id=? AND parent_id IS ? AND deleted_at IS NULL",
                                     (w["season_id"], w.get("parent_id"))) or 0) + 1
 
 
-WBS = Wbs("wbs", "wbs_elements", "Elemento da EAP", {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "parent_id": F("ref", "Elemento superior", ref="wbs_elements"),
-    "name": F("text", "Nome", required=True, max=250),
-    "description": F("long", "Descrição"),
-    "area_id": F("ref", "Área", ref="areas"),
-    "owner_id": F("ref", "Responsável", ref="users"),
-    "duration_days": F("int", "Duração estimada (dias)", min=0, max=3650),
-    "start_date": F("date", "Início"),
-    "end_date": F("date", "Término"),
-    "cost_estimate": F("money", "Custo estimado"),
-    "acceptance_criteria": F("long", "Critérios de aceitação"),
-    "manual_progress": F("int", "Progresso manual (%)", min=0, max=100),
+WBS = Wbs("wbs", "wbs_elements", _t("Elemento da EAP"), {
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "parent_id": F("ref", _t("Elemento superior"), ref="wbs_elements"),
+    "name": F("text", _t("Nome"), required=True, max=250),
+    "description": F("long", _t("Descrição")),
+    "area_id": F("ref", _t("Área"), ref="areas"),
+    "owner_id": F("ref", _t("Responsável"), ref="users"),
+    "duration_days": F("int", _t("Duração estimada (dias)"), min=0, max=3650),
+    "start_date": F("date", _t("Início")),
+    "end_date": F("date", _t("Término")),
+    "cost_estimate": F("money", _t("Custo estimado")),
+    "acceptance_criteria": F("long", _t("Critérios de aceitação")),
+    "manual_progress": F("int", _t("Progresso manual (%)"), min=0, max=100),
 }, season=True, archive=False, order="sort, name")
 
 
@@ -97,7 +98,7 @@ def build_tree(db, season_id):
 def list_wbs(ctx):
     judge_module_guard(ctx, "eap")
     if not ctx.query.get("season_id"):
-        raise bad("Informe a temporada.")
+        raise bad(_t("Informe a temporada."))
     return {"items": build_tree(ctx.db, ctx.query["season_id"])}
 
 
@@ -120,14 +121,14 @@ def move_wbs(ctx):
     db = ctx.db
     w = WBS.raw(db, ctx.params["id"])
     if not w:
-        raise not_found("Elemento da EAP")
+        raise not_found(_t("Elemento da EAP"))
     parent = ctx.body.get("parent_id") or None
     if parent:
         p = WBS.raw(db, parent)
         if not p or p["season_id"] != w["season_id"]:
-            raise bad("Destino inválido.")
+            raise bad(_t("Destino inválido."))
         if is_descendant(db, parent, w["id"]):
-            raise bad("Um elemento não pode ser movido para dentro de si mesmo ou de um de seus descendentes.")
+            raise bad(_t("Um elemento não pode ser movido para dentro de si mesmo ou de um de seus descendentes."))
     pos = ctx.body.get("position")
     sibs = [r["id"] for r in db.q("SELECT id FROM wbs_elements WHERE season_id=? AND parent_id IS ? AND deleted_at IS NULL AND id<>? ORDER BY sort, name",
                                   (w["season_id"], parent, w["id"]))]
@@ -145,7 +146,7 @@ def delete_wbs(ctx):
     db = ctx.db
     w = WBS.raw(db, ctx.params["id"])
     if not w:
-        raise not_found("Elemento da EAP")
+        raise not_found(_t("Elemento da EAP"))
     ids, stack = [], [w["id"]]
     while stack:
         n = stack.pop()
@@ -154,12 +155,12 @@ def delete_wbs(ctx):
     marks = ",".join("?" * len(ids))
     n_act = db.val(f"SELECT COUNT(*) FROM activities WHERE wbs_id IN ({marks}) AND deleted_at IS NULL", ids)
     if (len(ids) > 1 or n_act) and ctx.query.get("cascade") != "1":
-        refs = [r for r in ({"label": "subelemento(s)", "count": len(ids) - 1}, {"label": "atividade(s) vinculada(s)", "count": n_act}) if r["count"]]
-        raise conflict("Este elemento possui " + " e ".join(f"{r['count']} {r['label']}" for r in refs) +
-                       ". Confirme para excluir toda a ramificação; as atividades serão apenas desvinculadas (não excluídas).",
+        refs = [r for r in ({"label": "subelemento(s)", "count": len(ids) - 1}, {"label": _t("atividade(s) vinculada(s)"), "count": n_act}) if r["count"]]
+        raise conflict(_t("Este elemento possui {0}. Confirme para excluir toda a ramificação; as atividades serão apenas desvinculadas (não excluídas).",
+                          ", ".join(f"{r['count']} {rnd(r['label'])}" for r in refs)),
                        code="vinculos_existentes", references=refs, can_cascade=True, can_archive=False)
     db.ex(f"UPDATE activities SET wbs_id=NULL WHERE wbs_id IN ({marks})", ids)
     db.ex(f"DELETE FROM risk_links WHERE entity_type='wbs' AND entity_id IN ({marks})", ids)
     db.ex(f"UPDATE wbs_elements SET deleted_at=?, version=version+1 WHERE id IN ({marks})", [now_iso()] + ids)
-    audit(ctx, "excluir", "wbs", w["id"], f"{w['name']} ({len(ids)} elemento(s); {n_act} atividade(s) desvinculada(s))", before=WBS.ser(w))
+    audit(ctx, "excluir", "wbs", w["id"], _t("{0} ({1} elemento(s); {2} atividade(s) desvinculada(s))", w['name'], len(ids), n_act), before=WBS.ser(w))
     return {"ok": True, "removed": len(ids), "unlinked_activities": n_act}

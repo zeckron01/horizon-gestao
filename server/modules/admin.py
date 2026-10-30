@@ -1,4 +1,5 @@
 """Administração: temporadas, áreas, configurações, auditoria, inconsistências, modelos, backup e restauração."""
+from ..i18n import _t
 import json
 import re
 import sqlite3
@@ -17,13 +18,13 @@ def ensure_base_data(db):
     if db.one("SELECT 1 FROM settings WHERE key='bootstrapped'"):
         return
     ts = now_iso()
-    for i, (name, color) in enumerate((("Engenharia", "#cc0000"), ("Gestão do projeto", "#4a86e8"), ("Empreendimento", "#9f67c2"), ("Projeto social", "#6aa84f")), 1):
+    for i, (name, color) in enumerate(((_t("Engenharia"), "#cc0000"), (_t("Gestão do projeto"), "#4a86e8"), (_t("Empreendimento"), "#9f67c2"), (_t("Projeto social"), "#6aa84f")), 1):
         db.insert("areas", {"id": new_id(), "name": name, "color": color, "sort": i, "created_at": ts, "updated_at": ts})
     sid = new_id()
     db.insert("seasons", {"id": sid, "name": "Temporada 2026", "year": 2026, "created_at": ts, "updated_at": ts})
     set_setting(db, "default_season_id", sid)
-    for name, typ, s, e in (("TRGO", "Torneio", "2026-10-23", None), ("FIRST LEGO League", "Competição", "2026-12-04", "2026-12-05"),
-                            ("Regional de STEM Racing", "Competição", "2026-12-06", None)):
+    for name, typ, s, e in (("TRGO", _t("Torneio"), "2026-10-23", None), (_t("FIRST LEGO League"), _t("Competição"), "2026-12-04", "2026-12-05"),
+                            (_t("Regional de STEM Racing"), _t("Competição"), "2026-12-06", None)):
         db.insert("events", {"id": new_id(), "season_id": sid, "name": name, "type": typ, "start_date": s, "end_date": e, "status": "ativo",
                              "source": "registro inicial (editável)", "created_at": ts, "updated_at": ts})
     set_setting(db, "bootstrapped", True)
@@ -32,50 +33,50 @@ def ensure_base_data(db):
 # ----------------------------------------------------------------------------- temporadas e áreas
 class Seasons(Resource):
     def validate(self, ctx, s, old):
-        check_order(s, "start_date", "end_date", "Início", "Término")
+        check_order(s, "start_date", "end_date", _t("Início"), _t("Término"))
         if ctx.db.one("SELECT 1 FROM seasons WHERE name=? AND id<>? AND deleted_at IS NULL", (s["name"], (old or {}).get("id", ""))):
-            raise bad("Já existe uma temporada com este nome.", {"name": "Nome já utilizado."})
+            raise bad(_t("Já existe uma temporada com este nome."), {"name": _t("Nome já utilizado.")})
 
     def before_delete(self, ctx, s):
         if get_setting(ctx.db, "default_season_id") == s["id"]:
-            raise conflict("Esta é a temporada padrão. Defina outra temporada como padrão antes de excluir.")
+            raise conflict(_t("Esta é a temporada padrão. Defina outra temporada como padrão antes de excluir."))
 
 
-SEASON = Seasons("seasons", "seasons", "Temporada", {
-    "name": F("text", "Nome", required=True, max=80),
-    "year": F("int", "Ano", required=True, min=2000, max=2100),
-    "start_date": F("date", "Início"),
-    "end_date": F("date", "Término"),
-    "notes": F("long", "Observações", max=4000),
-    "budget_planned": F("money", "Orçamento total planejado", default=0),
-    "fundraising_goal": F("money", "Meta de captação", default=0),
-    "opening_balance": F("money", "Saldo inicial em caixa", min=-10 ** 12, default=0),
+SEASON = Seasons("seasons", "seasons", _t("Temporada"), {
+    "name": F("text", _t("Nome"), required=True, max=80),
+    "year": F("int", _t("Ano"), required=True, min=2000, max=2100),
+    "start_date": F("date", _t("Início")),
+    "end_date": F("date", _t("Término")),
+    "notes": F("long", _t("Observações"), max=4000),
+    "budget_planned": F("money", _t("Orçamento total planejado"), default=0),
+    "fundraising_goal": F("money", _t("Meta de captação"), default=0),
+    "opening_balance": F("money", _t("Saldo inicial em caixa"), min=-10 ** 12, default=0),
 }, order="year DESC, name", refs=tuple(
     (t, "season_id", lab, "deleted_at IS NULL") for t, lab in (
-        ("activities", "atividade(s)"), ("wbs_elements", "elemento(s) da EAP"), ("risks", "risco(s)"), ("events", "evento(s)"),
-        ("expenses", "despesa(s)"), ("incomes", "receita(s)"), ("stakeholders", "stakeholder(s)"), ("evidence_weeks", "semana(s) de evidências")))
-    + (("movements", "season_id", "movimento(s) de caixa"), ("scopes", "season_id", "escopo")))
+        ("activities", "atividade(s)"), ("wbs_elements", _t("elemento(s) da EAP")), ("risks", "risco(s)"), ("events", "evento(s)"),
+        ("expenses", "despesa(s)"), ("incomes", "receita(s)"), ("stakeholders", "stakeholder(s)"), ("evidence_weeks", _t("semana(s) de evidências"))))
+    + (("movements", "season_id", _t("movimento(s) de caixa")), ("scopes", "season_id", "escopo")))
 SEASON.register()
 
 
 class Areas(Resource):
     def validate(self, ctx, a, old):
         if ctx.db.one("SELECT 1 FROM areas WHERE name=? AND id<>? AND deleted_at IS NULL", (a["name"], (old or {}).get("id", ""))):
-            raise bad("Já existe uma área com este nome.", {"name": "Nome já utilizado."})
+            raise bad(_t("Já existe uma área com este nome."), {"name": _t("Nome já utilizado.")})
         if not old and not a.get("sort"):
             a["sort"] = (ctx.db.val("SELECT COALESCE(MAX(sort),0) FROM areas") or 0) + 1
 
 
-AREA = Areas("areas", "areas", "Área", {
-    "name": F("text", "Nome", required=True, max=80),
-    "color": F("color", "Cor", default="#64748b"),
-    "sort": F("int", "Ordem", min=0, max=1000),
-    "description": F("long", "Descrição", max=2000),
-    "logo_file_id": F("ref", "Logo da área", ref="files"),
+AREA = Areas("areas", "areas", _t("Área"), {
+    "name": F("text", _t("Nome"), required=True, max=80),
+    "color": F("color", _t("Cor"), default="#64748b"),
+    "sort": F("int", _t("Ordem"), min=0, max=1000),
+    "description": F("long", _t("Descrição"), max=2000),
+    "logo_file_id": F("ref", _t("Logo da área"), ref="files"),
 }, order="sort, name", refs=(
     ("activities", "area_id", "atividade(s)", "deleted_at IS NULL"), ("users", "area_id", "integrante(s)", "deleted_at IS NULL"),
-    ("wbs_elements", "area_id", "elemento(s) da EAP", "deleted_at IS NULL"), ("expenses", "area_id", "despesa(s)", "deleted_at IS NULL"),
-    ("evidence_entries", "area_id", "registro(s) de evidência"), ("risk_areas", "area_id", "risco(s)"),
+    ("wbs_elements", "area_id", _t("elemento(s) da EAP"), "deleted_at IS NULL"), ("expenses", "area_id", "despesa(s)", "deleted_at IS NULL"),
+    ("evidence_entries", "area_id", _t("registro(s) de evidência")), ("risk_areas", "area_id", "risco(s)"),
     ("stakeholders", "area_id", "stakeholder(s)", "deleted_at IS NULL"), ("events", "area_id", "evento(s)", "deleted_at IS NULL")))
 AREA.register()
 
@@ -84,10 +85,10 @@ AREA.register()
 def reorder_areas(ctx):
     ids = ctx.body.get("ids")
     if not isinstance(ids, list):
-        raise bad("Lista de áreas inválida.")
+        raise bad(_t("Lista de áreas inválida."))
     for i, aid in enumerate(ids, 1):
         ctx.db.ex("UPDATE areas SET sort=?, updated_at=? WHERE id=?", (i, now_iso(), aid))
-    audit(ctx, "reordenar", "areas", None, "Ordem das áreas alterada")
+    audit(ctx, "reordenar", "areas", None, _t("Ordem das áreas alterada"))
     return {"ok": True}
 
 
@@ -108,7 +109,7 @@ def copy_structure(ctx):
     target = SEASON.raw(db, ctx.params["id"])
     source = SEASON.raw(db, str(ctx.body.get("from_season_id")))
     if not target or not source or target["id"] == source["id"]:
-        raise bad("Selecione uma temporada de origem diferente da de destino.")
+        raise bad(_t("Selecione uma temporada de origem diferente da de destino."))
     include = set(ctx.body.get("include") or ["wbs", "activities", "risks"])
     years = target["year"] - source["year"]
     ts = now_iso()
@@ -173,66 +174,73 @@ def copy_structure(ctx):
                                  "location": r["location"], "area_id": r["area_id"], "objectives": r["objectives"], "checklist": r["checklist"], "status": "ativo",
                                  "source": f"modelo:{source['name']}", "created_at": ts, "updated_at": ts, "created_by": ctx.uid})
         counts["eventos"] = len(rows)
-    audit(ctx, "copiar_estrutura", "seasons", target["id"], f"Estrutura copiada de {source['name']} para {target['name']}: {counts}")
+    audit(ctx, "copiar_estrutura", "seasons", target["id"], _t("Estrutura copiada de {0} para {1}: {2}", source['name'], target['name'], counts))
     return {"ok": True, "counts": counts, "shift_years": years}
 
 
 # ----------------------------------------------------------------------------- configurações
 def _validate_setting(db, key, v):
     if key in ("team_name", "team_subtitle"):
-        return F("text", "Nome", required=key == "team_name", max=120).parse(db, key, v)
+        return F("text", _t("Nome"), required=key == "team_name", max=120).parse(db, key, v)
     if key == "timezone":
         from zoneinfo import ZoneInfo
         try:
             ZoneInfo(str(v))
         except Exception:
-            raise bad("Fuso horário inválido (ex.: America/Sao_Paulo).")
+            raise bad(_t("Fuso horário inválido (ex.: America/Sao_Paulo)."))
         return str(v)
     if key == "date_format":
         if v not in ("DD/MM/AAAA", "AAAA-MM-DD", "DD/MM/AA"):
-            raise bad("Formato de data inválido.")
+            raise bad(_t("Formato de data inválido."))
         return v
     if key == "currency":
         if v != "BRL":
-            raise bad("No momento a plataforma opera apenas em Real (BRL).")
+            raise bad(_t("No momento a plataforma opera apenas em Real (BRL)."))
         return v
     if key == "default_season_id":
         if not db.one("SELECT 1 FROM seasons WHERE id=? AND deleted_at IS NULL", (v,)):
-            raise bad("Temporada inválida.")
+            raise bad(_t("Temporada inválida."))
         return v
     if not isinstance(v, (dict, list)):
-        raise bad("Valor de configuração inválido.")
+        raise bad(_t("Valor de configuração inválido."))
     if len(json.dumps(v)) > 100000:
-        raise bad("Configuração extensa demais.")
+        raise bad(_t("Configuração extensa demais."))
     if key == "theme":
         for c in ("primary", "accent"):
-            F("color", "Cor", required=True).parse(db, c, v.get(c))
+            F("color", _t("Cor"), required=True).parse(db, c, v.get(c))
         if v.get("mode") not in ("claro", "escuro", "auto"):
-            raise bad("Tema inválido.")
+            raise bad(_t("Tema inválido."))
         return {"primary": v["primary"], "accent": v["accent"], "mode": v["mode"], "background_file_id": v.get("background_file_id"), "logo_file_id": v.get("logo_file_id")}
+    if key == "impact_matrix":
+        cells = v.get("cells")
+        if not (isinstance(cells, list) and len(cells) == 5 and all(isinstance(r, list) and len(r) == 5 for r in cells)):
+            raise bad(_t("A matriz de impacto deve ter 5 linhas (probabilidade) × 5 colunas (impacto)."))
+        clean = [[str(c or "").strip()[:300] for c in row] for row in cells]
+        return {"source": str(v.get("source") or "")[:120], "probability_labels": [str(x)[:60] for x in (v.get("probability_labels") or [])][:5],
+                "impact_labels": [str(x)[:60] for x in (v.get("impact_labels") or [])][:5], "cells": clean}
     if key == "alerts":
         out = {}
         for k, dflt in DEFAULT_SETTINGS["alerts"].items():
-            out[k] = F("int", "Dias", min=0 if k == "delivery_days" else 1, max=365).parse(db, k, v.get(k, dflt))
+            out[k] = F("int", _t("Dias"), min=0 if k == "delivery_days" else 1, max=365).parse(db, k, v.get(k, dflt))
         return out
     if key == "risk_scale":
         size = v.get("size")
         if size not in (3, 4, 5, 10):
-            raise bad("Tamanho de escala inválido (use 3, 4, 5 ou 10).")
+            raise bad(_t("Tamanho de escala inválido (use 3, 4, 5 ou 10)."))
         for lab in ("probability_labels", "impact_labels"):
             if not isinstance(v.get(lab), list) or len(v[lab]) != size or not all(str(x).strip() for x in v[lab]):
-                raise bad(f"Informe {size} rótulos para a escala.")
+                raise bad(_t("Informe {0} rótulos para a escala.", size))
         bands = v.get("bands")
         if not isinstance(bands, list) or not 2 <= len(bands) <= 6:
-            raise bad("Defina entre 2 e 6 faixas de classificação.")
+            raise bad(_t("Defina entre 2 e 6 faixas de classificação."))
         prev = 0
         for b in bands:
             if not str(b.get("name") or "").strip() or not isinstance(b.get("max"), int) or b["max"] <= prev:
-                raise bad("As faixas devem ter nome e limites máximos crescentes.")
-            F("color", "Cor", required=True).parse(db, "color", b.get("color"))
+                raise bad(_t("As faixas devem ter nome e limites máximos crescentes."))
+            F("color", _t("Cor"), required=True).parse(db, "color", b.get("color"))
             prev = b["max"]
         if bands[-1]["max"] != size * size:
-            raise bad(f"A última faixa deve terminar em {size * size} (pontuação máxima).")
+            raise bad(_t("A última faixa deve terminar em {0} (pontuação máxima).", size * size))
         return {"size": size, "probability_labels": [str(x).strip()[:40] for x in v["probability_labels"]], "impact_labels": [str(x).strip()[:40] for x in v["impact_labels"]],
                 "bands": [{"name": str(b["name"]).strip()[:30], "max": b["max"], "color": b["color"], "hint": str(b.get("hint") or "")[:80]} for b in bands]}
     if key == "catalogs":
@@ -240,19 +248,19 @@ def _validate_setting(db, key, v):
         for k, dflt in DEFAULT_SETTINGS["catalogs"].items():
             val = v.get(k, dflt)
             if not isinstance(val, list) or len(val) > 200:
-                raise bad("Lista de categorias inválida.")
+                raise bad(_t("Lista de categorias inválida."))
             if k == "acquisition_types":
                 keys = set()
                 out[k] = []
                 for t in val:
                     kk = re.sub(r"[^a-z0-9_]", "", str(t.get("key") or "").lower())[:40]
                     if not kk or kk in keys or not str(t.get("label") or "").strip():
-                        raise bad("Tipos de aquisição: cada tipo precisa de chave única e nome.")
+                        raise bad(_t("Tipos de aquisição: cada tipo precisa de chave única e nome."))
                     keys.add(kk)
                     out[k].append({"key": kk, "label": str(t["label"]).strip()[:80], "is_cash": bool(t.get("is_cash"))})
                 used = {r["acquisition_type"] for r in db.q("SELECT DISTINCT acquisition_type FROM expenses WHERE deleted_at IS NULL")}
                 if used - keys:
-                    raise bad("Não é possível remover tipos de aquisição em uso por despesas: " + ", ".join(sorted(used - keys)))
+                    raise bad(_t("Não é possível remover tipos de aquisição em uso por despesas: {0}", ", ".join(sorted(used - keys))))
             else:
                 out[k] = list(dict.fromkeys(str(x).strip()[:80] for x in val if str(x).strip()))
         return out
@@ -260,9 +268,9 @@ def _validate_setting(db, key, v):
         mods = {k: bool((v.get("modules") or {}).get(k, d)) for k, d in DEFAULT_SETTINGS["judge_view"]["modules"].items()}
         return {"finance_summary": bool(v.get("finance_summary")), "finance_detail": bool(v.get("finance_detail")), "contacts": bool(v.get("contacts")), "modules": mods}
     if key == "evidence_weights":
-        out = {k: F("int", "Peso", min=0, max=100).parse(db, k, v.get(k, 0)) or 0 for k in DEFAULT_SETTINGS["evidence_weights"]}
+        out = {k: F("int", _t("Peso"), min=0, max=100).parse(db, k, v.get(k, 0)) or 0 for k in DEFAULT_SETTINGS["evidence_weights"]}
         if sum(out.values()) <= 0:
-            raise bad("Defina ao menos um critério com peso maior que zero.")
+            raise bad(_t("Defina ao menos um critério com peso maior que zero."))
         return out
     if key == "governance":
         return {"require_approval_to_complete": bool(v.get("require_approval_to_complete")), "reapprove_on_change": bool(v.get("reapprove_on_change", True))}
@@ -274,30 +282,30 @@ def _validate_setting(db, key, v):
                 acts.append({"key": k, "label": str(f["label"]).strip()[:60], "type": f["type"]})
         return {"activities": acts}
     if key == "report_templates":
-        return [{"id": str(t.get("id") or new_id())[:40], "name": str(t.get("name") or "Modelo")[:80], "report": str(t.get("report") or "")[:40],
+        return [{"id": str(t.get("id") or new_id())[:40], "name": str(t.get("name") or _t("Modelo"))[:80], "report": str(t.get("report") or "")[:40],
                  "options": t.get("options") if isinstance(t.get("options"), dict) else {}} for t in v[:50] if isinstance(t, dict)]
     if key == "uploads":
         exts = [re.sub(r"[^a-z0-9]", "", str(x).lower())[:8] for x in (v.get("allowed_ext") or [])]
         banned = {"html", "htm", "svg", "js", "exe", "bat", "cmd", "sh", "php", "msi", "jar", "com", "scr", "vbs", "ps1"}
         exts = [x for x in dict.fromkeys(exts) if x and x not in banned]
         if not exts:
-            raise bad("Informe ao menos um tipo de arquivo permitido.")
+            raise bad(_t("Informe ao menos um tipo de arquivo permitido."))
         return {"allowed_ext": exts}
-    raise bad("Configuração desconhecida.")
+    raise bad(_t("Configuração desconhecida."))
 
 
 @route("PUT", "/api/settings/{key}")
 def save_setting(ctx):
     key = ctx.params["key"]
     if key not in DEFAULT_SETTINGS or key in USER_SCOPED:
-        raise bad("Configuração desconhecida.")
-    gestor_ok = {"catalogs", "alerts", "risk_scale", "evidence_weights", "custom_fields", "report_templates"}
+        raise bad(_t("Configuração desconhecida."))
+    gestor_ok = {"catalogs", "alerts", "risk_scale", "impact_matrix", "evidence_weights", "custom_fields", "report_templates"}
     if ctx.role != "admin" and key not in gestor_ok:
-        raise forbidden("Esta configuração é restrita ao administrador.")
+        raise forbidden(_t("Esta configuração é restrita ao administrador."))
     before = get_setting(ctx.db, key)
     val = _validate_setting(ctx.db, key, ctx.body.get("value"))
     set_setting(ctx.db, key, val, by=ctx.uid)
-    audit(ctx, "configurar", "settings", key, f"Configuração alterada: {key}", before={"value": before}, after={"value": val})
+    audit(ctx, "configurar", "settings", key, _t("Configuração alterada: {0}", key), before={"value": before}, after={"value": val})
     return {"key": key, "value": get_setting(ctx.db, key)}
 
 
@@ -309,7 +317,7 @@ def list_audit(ctx):
     if ctx.role not in STAFF:
         # integrantes consultam apenas o histórico de um registro específico
         if not (q.get("entity_type") and q.get("entity_id")) or q["entity_type"] in ("users", "sessao", "settings", "permissao", "expenses", "incomes"):
-            raise forbidden("O histórico geral é restrito à gestão.")
+            raise forbidden(_t("O histórico geral é restrito à gestão."))
     for k in ("entity_type", "entity_id", "user_id", "action"):
         if q.get(k):
             conds.append(f"{k}=?")
@@ -335,10 +343,10 @@ def list_audit(ctx):
 
 
 # ----------------------------------------------------------------------------- inconsistências
-REVIEW_TABLES = {"activities": ("activities", "title", "Atividade"), "wbs": ("wbs_elements", "name", "EAP"), "risks": ("risks", "title", "Risco"),
-                 "expenses": ("expenses", "name", "Despesa"), "incomes": ("incomes", "description", "Receita"),
-                 "stakeholders": ("stakeholders", "name", "Stakeholder"), "evidence_weeks": ("evidence_weeks", "month", "Evidências"),
-                 "scopes": ("scopes", None, "Escopo")}
+REVIEW_TABLES = {"activities": ("activities", "title", _t("Atividade")), "wbs": ("wbs_elements", "name", "EAP"), "risks": ("risks", "title", _t("Risco")),
+                 "expenses": ("expenses", "name", _t("Despesa")), "incomes": ("incomes", "description", _t("Receita")),
+                 "stakeholders": ("stakeholders", "name", _t("Stakeholder")), "evidence_weeks": ("evidence_weeks", "month", _t("Evidências")),
+                 "scopes": ("scopes", None, _t("Escopo"))}
 
 
 def find_inconsistencies(ctx, season_id):
@@ -351,28 +359,28 @@ def find_inconsistencies(ctx, season_id):
         out.append({"module": module, "level": level, "title": title, "message": message, "entity_type": entity_type, "entity_id": entity_id, "fix": fix, "code": code})
     for et, (table, tcol, label) in REVIEW_TABLES.items():
         for r in db.q(f"SELECT * FROM {table} WHERE season_id=? AND needs_review=1" + (" AND deleted_at IS NULL" if et != "scopes" else ""), (season_id,)):
-            title = "Escopo do projeto" if not tcol else (r[tcol] if et != "evidence_weeks" else f"{r['month']} — semana {r['week_number']}")
-            add(label, "revisar", title, r["review_note"] or "Registro importado que precisa de revisão.", et, r["id"], "resolver_revisao", "revisao_importacao")
+            title = _t("Escopo do projeto") if not tcol else (r[tcol] if et != "evidence_weeks" else _t("{0} — semana {1}", r['month'], r['week_number']))
+            add(label, "revisar", title, r["review_note"] or _t("Registro importado que precisa de revisão."), et, r["id"], "resolver_revisao", "revisao_importacao")
     acts, deps = load_graph(db, season_id)
     for c in schedule_conflicts(acts, deps, today):
-        add("Cronograma", "erro" if c["kind"] == "conflito" else "aviso", c["successor_title"], c["message"], "activities", c["successor_id"], None, "dependencia_" + c["kind"])
+        add(_t("Cronograma"), "erro" if c["kind"] == "conflito" else "aviso", c["successor_title"], c["message"], "activities", c["successor_id"], None, "dependencia_" + c["kind"])
     seen = {}
     for a in acts.values():
         if a["status"] == "cancelada":
             continue
         if not a["owner_id"]:
-            add("Planejamento", "aviso", a["title"], "Atividade sem responsável principal.", "activities", a["id"], None, "sem_responsavel")
+            add(_t("Planejamento"), "aviso", a["title"], _t("Atividade sem responsável principal."), "activities", a["id"], None, "sem_responsavel")
         if not a["planned_end"]:
-            add("Planejamento", "aviso", a["title"], "Atividade sem prazo final planejado.", "activities", a["id"], None, "sem_prazo")
+            add(_t("Planejamento"), "aviso", a["title"], _t("Atividade sem prazo final planejado."), "activities", a["id"], None, "sem_prazo")
         elif not a["planned_start"]:
-            add("Cronograma", "info", a["title"], "Atividade sem data de início planejada (aparece no Gantt apenas como ponto no prazo).", "activities", a["id"], None, "sem_inicio")
+            add(_t("Cronograma"), "info", a["title"], _t("Atividade sem data de início planejada (aparece no Gantt apenas como ponto no prazo)."), "activities", a["id"], None, "sem_inicio")
         if a["status"] != "concluida" and a["planned_end"] and a["planned_end"] < today and not (a["delay_justification"] or "").strip():
-            add("Cronograma", "erro", a["title"], f"Atrasada desde {fmt_date(a['planned_end'])} sem justificativa registrada.", "activities", a["id"], None, "atraso_sem_justificativa")
+            add(_t("Cronograma"), "erro", a["title"], _t("Atrasada desde {0} sem justificativa registrada.", fmt_date(a['planned_end'])), "activities", a["id"], None, "atraso_sem_justificativa")
         if a["status"] == "concluida" and a["planned_end"] and a["actual_end"] and a["actual_end"] > a["planned_end"] and not (a["delay_justification"] or "").strip():
-            add("Cronograma", "aviso", a["title"], f"Concluída com atraso ({fmt_date(a['actual_end'])}, prazo {fmt_date(a['planned_end'])}) sem justificativa registrada.", "activities", a["id"], None, "conclusao_tardia_sem_justificativa")
+            add(_t("Cronograma"), "aviso", a["title"], _t("Concluída com atraso ({0}, prazo {1}) sem justificativa registrada.", fmt_date(a['actual_end']), fmt_date(a['planned_end'])), "activities", a["id"], None, "conclusao_tardia_sem_justificativa")
         key = (a["area_id"], a["title"].strip().lower())
         if key in seen:
-            add("Planejamento", "aviso", a["title"], "Título repetido na mesma área — verifique se é duplicidade.", "activities", a["id"], None, "titulo_duplicado")
+            add(_t("Planejamento"), "aviso", a["title"], _t("Título repetido na mesma área — verifique se é duplicidade."), "activities", a["id"], None, "titulo_duplicado")
         seen[key] = a["id"]
     users = {u["id"]: u for u in db.q("SELECT * FROM users WHERE deleted_at IS NULL")}
     actives = [u for u in users.values() if u["active"] and u["role"] != "juiz"]
@@ -388,24 +396,24 @@ def find_inconsistencies(ctx, season_id):
         for kind, lab in (("planned", "planejado"), ("actual", "real")):
             q, u, t = e["quantity"], e[f"unit_{kind}_cents"], e[f"total_{kind}_cents"]
             if q is not None and u is not None and t is not None and abs(round(q * u) - t) > 1:
-                add("Orçamento", "erro", e["name"], f"Valor total {lab} (R$ {from_cents(t):.2f}) diferente de quantidade × unitário ({q:g} × R$ {from_cents(u):.2f} = R$ {from_cents(round(q * u)):.2f}).",
+                add(_t("Orçamento"), "erro", e["name"], _t("Valor total {0} (R$ {1}) diferente de quantidade × unitário ({2} × R$ {3} = R$ {4}).", lab, format(from_cents(t), '.2f'), format(q, 'g'), format(from_cents(u), '.2f'), format(from_cents(round(q * u)), '.2f')),
                     "expenses", e["id"], f"corrigir_total_{kind}", "total_inconsistente")
         if not e["is_cash"] and not (e["total_actual_cents"] or e["total_planned_cents"]):
-            add("Orçamento", "info", e["name"], "Item recebido por patrocínio/doação sem valor estimado — o apoio não aparece nos totais de contribuição não financeira.", "expenses", e["id"], None, "apoio_sem_valor")
+            add(_t("Orçamento"), "info", e["name"], _t("Item recebido por patrocínio/doação sem valor estimado — o apoio não aparece nos totais de contribuição não financeira."), "expenses", e["id"], None, "apoio_sem_valor")
     season = db.one("SELECT * FROM seasons WHERE id=?", (season_id,))
     items = db.val("SELECT COALESCE(SUM(total_planned_cents),0) FROM expenses WHERE season_id=? AND deleted_at IS NULL AND archived_at IS NULL AND is_cash=1 AND status<>'cancelada'", (season_id,))
     if season and season["budget_planned_cents"] and items > season["budget_planned_cents"]:
-        add("Orçamento", "erro", "Orçamento da temporada", f"A soma dos itens planejados (R$ {from_cents(items):.2f}) supera o orçamento total (R$ {from_cents(season['budget_planned_cents']):.2f}).", "seasons", season_id, None, "orcamento_excedido")
+        add(_t("Orçamento"), "erro", _t("Orçamento da temporada"), _t("A soma dos itens planejados (R$ {0}) supera o orçamento total (R$ {1}).", format(from_cents(items), '.2f'), format(from_cents(season['budget_planned_cents']), '.2f')), "seasons", season_id, None, "orcamento_excedido")
     from .risks import RISK, expand_risks
     for r in expand_risks(db, [RISK.ser(x) for x in db.q("SELECT * FROM risks WHERE season_id=? AND deleted_at IS NULL AND archived_at IS NULL AND status<>'encerrado'", (season_id,))]):
         if r["no_owner"]:
-            add("Riscos", "aviso", f"{r['code']} — {r['title']}", "Risco sem responsável (pessoa) definido." + (f" Planilha original: “{r['owner_text']}”." if r.get("owner_text") else ""), "risks", r["id"], None, "risco_sem_responsavel")
+            add(_t("Riscos"), "aviso", f"{r['code']} — {r['title']}", (_t("Risco sem responsável (pessoa) definido. Planilha original: “{0}”.", r['owner_text']) if r.get("owner_text") else _t("Risco sem responsável (pessoa) definido.")), "risks", r["id"], None, "risco_sem_responsavel")
         if r["no_plan"]:
-            add("Riscos", "aviso", f"{r['code']} — {r['title']}", "Risco sem plano de ação.", "risks", r["id"], None, "risco_sem_plano")
+            add(_t("Riscos"), "aviso", f"{r['code']} — {r['title']}", _t("Risco sem plano de ação."), "risks", r["id"], None, "risco_sem_plano")
         if r["level_divergence"]:
-            add("Riscos", "revisar", f"{r['code']} — {r['title']}", f"Nível na planilha original: “{r['original_level']}”; pela escala atual (P×I = {r['score']}): “{r['level']}”. Ajuste probabilidade/impacto ou as faixas.", "risks", r["id"], None, "nivel_divergente")
+            add(_t("Riscos"), "revisar", f"{r['code']} — {r['title']}", _t("Nível na planilha original: “{0}”; pela escala atual (P×I = {1}): “{2}”. Ajuste probabilidade/impacto ou as faixas.", r['original_level'], r['score'], r['level']), "risks", r["id"], None, "nivel_divergente")
     for w in db.q("SELECT * FROM evidence_weeks WHERE season_id=? AND deleted_at IS NULL AND (start_date IS NULL OR end_date IS NULL)", (season_id,)):
-        add("Evidências", "aviso", f"{w['month']} — semana {w['week_number']}", "Semana sem datas de início e término — os indicadores automáticos não podem ser calculados.", "evidence_weeks", w["id"], None, "semana_sem_datas")
+        add(_t("Evidências"), "aviso", _t("{0} — semana {1}", w['month'], w['week_number']), _t("Semana sem datas de início e término — os indicadores automáticos não podem ser calculados."), "evidence_weeks", w["id"], None, "semana_sem_datas")
     order = {"erro": 0, "revisar": 1, "aviso": 2, "info": 3}
     out.sort(key=lambda x: (order[x["level"]], x["module"], x["title"]))
     return out
@@ -415,7 +423,7 @@ def find_inconsistencies(ctx, season_id):
 def inconsistencies(ctx):
     sid = ctx.query.get("season_id")
     if not sid:
-        raise bad("Informe a temporada.")
+        raise bad(_t("Informe a temporada."))
     items = find_inconsistencies(ctx, sid)
     summary = {}
     for i in items:
@@ -430,37 +438,37 @@ def fix_inconsistency(ctx):
     fix, et, eid = b.get("fix"), b.get("entity_type"), b.get("entity_id")
     if fix == "resolver_revisao":
         if et not in REVIEW_TABLES:
-            raise bad("Tipo de registro inválido.")
+            raise bad(_t("Tipo de registro inválido."))
         table = REVIEW_TABLES[et][0]
         r = db.one(f"SELECT * FROM {table} WHERE id=?", (eid,))
         if not r:
-            raise not_found("Registro")
+            raise not_found(_t("Registro"))
         db.ex(f"UPDATE {table} SET needs_review=0, updated_at=? WHERE id=?", (now_iso(), eid))
-        audit(ctx, "revisar", et, eid, f"Revisão concluída: {r.get('review_note') or ''}"[:300])
+        audit(ctx, "revisar", et, eid, _t("Revisão concluída: {0}", r.get('review_note') or '')[:300])
         return {"ok": True}
     if fix in ("corrigir_total_planned", "corrigir_total_actual"):
         kind = fix.rsplit("_", 1)[1]
         e = db.one("SELECT * FROM expenses WHERE id=? AND deleted_at IS NULL", (eid,))
         if not e:
-            raise not_found("Despesa")
+            raise not_found(_t("Despesa"))
         mode = b.get("mode")
         q, u, t = e["quantity"], e[f"unit_{kind}_cents"], e[f"total_{kind}_cents"]
         if mode == "recalcular_total":
             newv = {f"total_{kind}_cents": int(round(q * u))}
         elif mode == "recalcular_unitario":
             if not q:
-                raise bad("Quantidade zerada: não é possível recalcular o valor unitário.")
+                raise bad(_t("Quantidade zerada: não é possível recalcular o valor unitário."))
             unit = int(round(t / q))
             if abs(round(q * unit) - t) > 1:
-                raise bad("O total não é divisível pela quantidade sem arredondamento; ajuste manualmente no cadastro da despesa.")
+                raise bad(_t("O total não é divisível pela quantidade sem arredondamento; ajuste manualmente no cadastro da despesa."))
             newv = {f"unit_{kind}_cents": unit, f"total_{kind}_cents": int(round(q * unit))}
         else:
-            raise bad("Escolha como corrigir: recalcular o total ou recalcular o valor unitário.")
+            raise bad(_t("Escolha como corrigir: recalcular o total ou recalcular o valor unitário."))
         sets = ", ".join(f"{k}=?" for k in newv)
         db.ex(f"UPDATE expenses SET {sets}, updated_at=?, version=version+1 WHERE id=?", list(newv.values()) + [now_iso(), eid])
         audit(ctx, "corrigir", "expenses", eid, f"{e['name']} — {mode}", before={k: e[k] for k in newv}, after=newv)
         return {"ok": True}
-    raise bad("Correção desconhecida.")
+    raise bad(_t("Correção desconhecida."))
 
 
 # ----------------------------------------------------------------------------- modelos reutilizáveis
@@ -478,16 +486,16 @@ def list_templates(ctx):
 def create_template(ctx):
     kind = ctx.body.get("kind")
     if kind not in TEMPLATE_KINDS:
-        raise bad("Tipo de modelo inválido.")
-    name = F("text", "Nome do modelo", required=True, max=120).parse(ctx.db, "name", ctx.body.get("name"))
+        raise bad(_t("Tipo de modelo inválido."))
+    name = F("text", _t("Nome do modelo"), required=True, max=120).parse(ctx.db, "name", ctx.body.get("name"))
     data = ctx.body.get("data")
     if not isinstance(data, dict) or len(json.dumps(data)) > 50000:
-        raise bad("Conteúdo do modelo inválido.")
+        raise bad(_t("Conteúdo do modelo inválido."))
     for k in ("id", "version", "season_id", "created_at", "updated_at", "created_by", "status", "progress", "actual_start", "actual_end", "approval_status"):
         data.pop(k, None)
     row = {"id": new_id(), "kind": kind, "name": name, "data": json.dumps(data, ensure_ascii=False), "created_by": ctx.uid, "created_at": now_iso()}
     ctx.db.insert("templates", row)
-    audit(ctx, "criar", "templates", row["id"], f"Modelo de {kind}: {name}")
+    audit(ctx, "criar", "templates", row["id"], _t("Modelo de {0}: {1}", kind, name))
     return dict(row, data=data)
 
 
@@ -495,9 +503,9 @@ def create_template(ctx):
 def delete_template(ctx):
     t = ctx.db.one("SELECT * FROM templates WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not t:
-        raise not_found("Modelo")
+        raise not_found(_t("Modelo"))
     ctx.db.ex("UPDATE templates SET deleted_at=? WHERE id=?", (now_iso(), t["id"]))
-    audit(ctx, "excluir", "templates", t["id"], f"Modelo: {t['name']}")
+    audit(ctx, "excluir", "templates", t["id"], _t("Modelo: {0}", t['name']))
     return {"ok": True}
 
 
@@ -506,7 +514,7 @@ def delete_template(ctx):
 #  - SQLite: cópia consistente do arquivo do banco (.db) na pasta de backups;
 #  - PostgreSQL: backup lógico (.hzb) guardado na tabela `backups` do próprio banco (não há disco no servidor).
 _BK_RX = re.compile(r"^horizon-[0-9A-Za-z_\-]+\.(db|hzb)$")
-_KINDS = {"auto": "automático", "pre-restauracao": "pré-restauração", "enviado": "enviado", "manual": "manual"}
+_KINDS = {"auto": _t("automático"), "pre-restauracao": _t("pré-restauração"), "enviado": "enviado", "manual": "manual"}
 
 
 def _pg():
@@ -563,7 +571,7 @@ def create_backup(label="manual", db=None):
         src.close()
     if ok != "ok":
         path.unlink(missing_ok=True)
-        raise ApiError(500, "backup_invalido", f"O backup falhou na verificação de integridade: {ok}")
+        raise ApiError(500, "backup_invalido", _t("O backup falhou na verificação de integridade: {0}", ok))
     return {"name": name, "size": path.stat().st_size, "integrity": ok, "migrations": n}
 
 
@@ -609,7 +617,7 @@ def db_size(db):
 @route("GET", "/api/admin/backups", allow=("admin",))
 def backups(ctx):
     last = ctx.db.one("SELECT value FROM settings WHERE key='last_auto_backup'")
-    return {"items": list_backups(ctx.db), "dir": "tabela “backups” do banco PostgreSQL" if _pg() else str(cfg.BACKUP_DIR),
+    return {"items": list_backups(ctx.db), "dir": _t("tabela “backups” do banco PostgreSQL") if _pg() else str(cfg.BACKUP_DIR),
             "storage": "banco" if _pg() else "disco", "format": "hzb" if _pg() else "db",
             "keep": cfg.BACKUP_KEEP, "auto_enabled": cfg.JOBS_ENABLED, "auto_hour": cfg.BACKUP_HOUR,
             "last_auto": json.loads(last["value"]) if last else None, "db_size": db_size(ctx.db),
@@ -620,28 +628,28 @@ def backups(ctx):
 def backup_now(ctx):
     b = create_backup("manual", ctx.db)
     ctx.db.begin()
-    audit(ctx, "backup", "backup", b["name"], f"Backup manual criado ({b['size']} bytes, integridade {b['integrity']})")
+    audit(ctx, "backup", "backup", b["name"], _t("Backup manual criado ({0} bytes, integridade {1})", b['size'], b['integrity']))
     ctx.db.commit()
     return b
 
 
 def _bk_name(name):
     if not _BK_RX.match(name or ""):
-        raise bad("Nome de backup inválido.")
+        raise bad(_t("Nome de backup inválido."))
     return name
 
 
 def _bk_path(name):
     p = cfg.BACKUP_DIR / _bk_name(name)
     if not p.exists():
-        raise not_found("Backup")
+        raise not_found(_t("Backup"))
     return p
 
 
 def _bk_data_pg(db, name):
     row = db.one("SELECT name, data FROM backups WHERE name=?", (_bk_name(name),))
     if not row:
-        raise not_found("Backup")
+        raise not_found(_t("Backup"))
     return bytes(row["data"])
 
 
@@ -664,7 +672,7 @@ def backup_download_part(ctx):
     if _pg():
         chunk = ctx.db.val("SELECT substring(data from ? for ?) FROM backups WHERE name=?", (n * BK_CHUNK + 1, BK_CHUNK, name))
         if chunk is None:
-            raise not_found("Backup")
+            raise not_found(_t("Backup"))
         chunk = bytes(chunk)
     else:
         with open(_bk_path(name), "rb") as fh:
@@ -684,12 +692,12 @@ def _upload_part(ctx):
     try:
         part, parts = int(b.get("part")), int(b.get("parts"))
     except (TypeError, ValueError):
-        raise bad("Envio em partes inválido.")
+        raise bad(_t("Envio em partes inválido."))
     if not _UP_RX.match(up_id) or not (1 <= parts <= 200) or not (0 <= part < parts):
-        raise bad("Envio em partes inválido.")
+        raise bad(_t("Envio em partes inválido."))
     data = ctx.files[0]["data"]
     if len(data) > BK_CHUNK + 1024:
-        raise bad("Parte acima do tamanho permitido.")
+        raise bad(_t("Parte acima do tamanho permitido."))
     db = ctx.db
     db.begin()
     db.ex("DELETE FROM files WHERE entity_type='backup_part' AND entity_id=? AND name=? AND uploaded_by=?", (up_id, f"{part:04d}", ctx.uid))
@@ -709,16 +717,16 @@ def _validate_backup_file(path):
         c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
             if c.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise bad("O arquivo de backup está corrompido (falha na verificação de integridade).")
+                raise bad(_t("O arquivo de backup está corrompido (falha na verificação de integridade)."))
             tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not {"schema_migrations", "users", "activities", "audit_log"} <= tables:
-                raise bad("O arquivo não é um backup desta plataforma.")
+                raise bad(_t("O arquivo não é um backup desta plataforma."))
             if not c.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1 AND password_hash IS NOT NULL AND deleted_at IS NULL").fetchone()[0]:
-                raise bad("O backup não contém nenhum administrador ativo; a restauração deixaria a plataforma sem acesso.")
+                raise bad(_t("O backup não contém nenhum administrador ativo; a restauração deixaria a plataforma sem acesso."))
         finally:
             c.close()
     except sqlite3.DatabaseError:
-        raise bad("O arquivo enviado não é um banco SQLite válido.")
+        raise bad(_t("O arquivo enviado não é um banco SQLite válido."))
 
 
 def _read_logical(data):
@@ -732,7 +740,7 @@ def _read_logical(data):
 @route("POST", "/api/admin/backups/enviar", allow=("admin",), tx=False)
 def backup_upload(ctx):
     if not ctx.files:
-        raise bad("Nenhum arquivo enviado.")
+        raise bad(_t("Nenhum arquivo enviado."))
     if ctx.body.get("parts") and str(ctx.body.get("parts")) != "1":
         data = _upload_part(ctx)
         if data is None:
@@ -744,11 +752,11 @@ def backup_upload(ctx):
         name = f"horizon-{_stamp()}-enviado.hzb"
         ctx.db.begin()
         ctx.db.insert("backups", {"name": name, "kind": "enviado", "created_at": now_iso(), "size": len(data), "data": data})
-        audit(ctx, "backup_enviado", "backup", name, f"Arquivo de backup enviado ({len(data)} bytes)")
+        audit(ctx, "backup_enviado", "backup", name, _t("Arquivo de backup enviado ({0} bytes)", len(data)))
         ctx.db.commit()
         return {"name": name, "size": len(data)}
     if not data.startswith(b"SQLite format 3\x00"):
-        raise bad("O arquivo enviado não é um banco SQLite válido.")
+        raise bad(_t("O arquivo enviado não é um banco SQLite válido."))
     cfg.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     name = f"horizon-{_stamp()}-enviado.db"
     p = cfg.BACKUP_DIR / name
@@ -759,7 +767,7 @@ def backup_upload(ctx):
         p.unlink(missing_ok=True)
         raise
     ctx.db.begin()
-    audit(ctx, "backup_enviado", "backup", name, f"Arquivo de backup enviado ({len(data)} bytes)")
+    audit(ctx, "backup_enviado", "backup", name, _t("Arquivo de backup enviado ({0} bytes)", len(data)))
     ctx.db.commit()
     return {"name": name, "size": len(data)}
 
@@ -792,12 +800,12 @@ def backup_restore(ctx):
     if _pg():
         data = _bk_data_pg(ctx.db, ctx.params["name"])
         if ctx.body.get("confirm") != "RESTAURAR":
-            raise bad("Para confirmar, digite RESTAURAR.", code="confirmacao_obrigatoria")
+            raise bad(_t("Para confirmar, digite RESTAURAR."), code="confirmacao_obrigatoria")
         safety = restore_logical(ctx.db, data, who, ctx.params["name"], ctx.ip)
         return {"ok": True, "restored": ctx.params["name"], "safety_backup": safety["name"], "relogin": True}
     p = _bk_path(ctx.params["name"])
     if ctx.body.get("confirm") != "RESTAURAR":
-        raise bad("Para confirmar, digite RESTAURAR.", code="confirmacao_obrigatoria")
+        raise bad(_t("Para confirmar, digite RESTAURAR."), code="confirmacao_obrigatoria")
     _validate_backup_file(p)
     safety = create_backup("pre-restauracao")
     src = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
@@ -822,13 +830,13 @@ def backup_restore(ctx):
 def backup_delete(ctx):
     if _pg():
         if not ctx.db.one("SELECT 1 FROM backups WHERE name=?", (_bk_name(ctx.params["name"]),)):
-            raise not_found("Backup")
+            raise not_found(_t("Backup"))
         ctx.db.ex("DELETE FROM backups WHERE name=?", (ctx.params["name"],))
-        audit(ctx, "excluir", "backup", ctx.params["name"], "Backup removido")
+        audit(ctx, "excluir", "backup", ctx.params["name"], _t("Backup removido"))
         return {"ok": True}
     p = _bk_path(ctx.params["name"])
     p.unlink()
-    audit(ctx, "excluir", "backup", p.name, "Arquivo de backup removido")
+    audit(ctx, "excluir", "backup", p.name, _t("Arquivo de backup removido"))
     return {"ok": True}
 
 
@@ -836,7 +844,7 @@ def backup_delete(ctx):
 def system_info(ctx):
     db = ctx.db
     return {"version": APP_VERSION, "migrations": [r["version"] for r in db.q("SELECT version FROM schema_migrations ORDER BY version")],
-            "database": ("PostgreSQL " + db.conn.server_version.split(" ")[0]) if db.dialect == "pg" else ("SQLite " + sqlite3.sqlite_version + " (WAL)"),
+            "database": (_t("PostgreSQL ") + db.conn.server_version.split(" ")[0]) if db.dialect == "pg" else (_t("SQLite ") + sqlite3.sqlite_version + " (WAL)"),
             "db_size": db_size(db), "serverless": cfg.SERVERLESS,
             "integrations": {"email": cfg.smtp_configured, "push": False, "cron_externo": bool(cfg.CRON_SECRET)},
             "jobs": {"enabled": cfg.JOBS_ENABLED, "interval_seconds": cfg.JOBS_INTERVAL_SECONDS, "last_run": db.val("SELECT MAX(started_at) FROM job_runs")},

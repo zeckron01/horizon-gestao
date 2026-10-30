@@ -11,6 +11,7 @@ Regras de cronograma (documentadas também em docs/REGRAS.md):
     SF: término da sucessora >= início da predecessora + defasagem
   (seguindo a planilha original, a sucessora pode começar no mesmo dia em que a predecessora termina.)
 """
+from ..i18n import _t, rnd
 import json
 
 from ..core import (F, INTERNAL, ROLES, STAFF, ApiError, Resource, add_days, audit, bad, check_order, conflict,
@@ -19,11 +20,11 @@ from ..core import (F, INTERNAL, ROLES, STAFF, ApiError, Resource, add_days, aud
 from ..db import new_id, now_iso
 
 STATUS = ("nao_iniciada", "em_andamento", "em_revisao", "aguardando_aprovacao", "bloqueada", "concluida", "cancelada")
-STATUS_LABEL = {"nao_iniciada": "Não iniciada", "em_andamento": "Em andamento", "em_revisao": "Em revisão",
-                "aguardando_aprovacao": "Aguardando aprovação", "bloqueada": "Bloqueada", "concluida": "Concluída", "cancelada": "Cancelada"}
-APPROVAL_LABEL = {"rascunho": "Rascunho", "em_execucao": "Em execução", "aguardando_aprovacao": "Aguardando aprovação",
-                  "aprovada": "Aprovada", "reprovada": "Reprovada para ajustes", "reenviada": "Reenviada para aprovação"}
-DEP_LABEL = {"FS": "Término → Início", "SS": "Início → Início", "FF": "Término → Término", "SF": "Início → Término"}
+STATUS_LABEL = {"nao_iniciada": _t("Não iniciada"), "em_andamento": _t("Em andamento"), "em_revisao": _t("Em revisão"),
+                "aguardando_aprovacao": _t("Aguardando aprovação"), "bloqueada": _t("Bloqueada"), "concluida": _t("Concluída"), "cancelada": _t("Cancelada")}
+APPROVAL_LABEL = {"rascunho": _t("Rascunho"), "em_execucao": _t("Em execução"), "aguardando_aprovacao": _t("Aguardando aprovação"),
+                  "aprovada": _t("Aprovada"), "reprovada": _t("Reprovada para ajustes"), "reenviada": _t("Reenviada para aprovação")}
+DEP_LABEL = {"FS": _t("Término → Início"), "SS": _t("Início → Início"), "FF": _t("Término → Término"), "SF": _t("Início → Término")}
 CONTENT_FIELDS = ("title", "description", "objective", "completion_criteria")
 MEMBER_FIELDS = {"status", "progress", "actual_start", "actual_end", "notes", "next_action", "version",
                  "delay_justification", "delay_impact", "recovery_plan", "forecast_end"}
@@ -44,15 +45,15 @@ class Activities(Resource):
             changed = [k for k in extra if k in self.fields and existing is not None and
                        self.fields[k].out(existing.get(self.fields[k].col(k))) != body[k]]
             if changed:
-                raise forbidden("Integrantes podem atualizar apenas situação, progresso, datas reais, observações e próxima ação "
-                                "das atividades em que estão envolvidos.")
+                raise forbidden(_t("Integrantes podem atualizar apenas situação, progresso, datas reais, observações e próxima ação "
+                                "das atividades em que estão envolvidos."))
             body = {k: v for k, v in body.items() if k in MEMBER_FIELDS}
         return super().parse(ctx, body, existing)
 
     def validate(self, ctx, a, old):
         db = ctx.db
-        check_order(a, "planned_start", "planned_end", "Início planejado", "Prazo final planejado")
-        check_order(a, "actual_start", "actual_end", "Início real", "Conclusão real")
+        check_order(a, "planned_start", "planned_end", _t("Início planejado"), _t("Prazo final planejado"))
+        check_order(a, "actual_start", "actual_end", _t("Início real"), _t("Conclusão real"))
         today = today_local(db)
         gov = get_setting(db, "governance")
         if a.get("custom") is not None and not isinstance(a["custom"], str):
@@ -61,33 +62,33 @@ class Activities(Resource):
         st = a.get("status") or "nao_iniciada"
         internal = getattr(ctx, "_approval_flow", False)
         if st == "aguardando_aprovacao" and old_status != st and not internal:
-            raise bad("Use a ação “Enviar para aprovação” para colocar a atividade em aprovação.", {"status": "Use Enviar para aprovação."})
+            raise bad(_t("Use a ação “Enviar para aprovação” para colocar a atividade em aprovação."), {"status": _t("Use Enviar para aprovação.")})
         if old and old_status == "aguardando_aprovacao" and st != old_status and not internal:
-            raise bad("Esta atividade aguarda aprovação. A situação só muda pela decisão do aprovador.", {"status": "Aguardando aprovação."})
+            raise bad(_t("Esta atividade aguarda aprovação. A situação só muda pela decisão do aprovador."), {"status": _t("Aguardando aprovação.")})
         if st == "concluida" and old_status != "concluida":
             if gov["require_approval_to_complete"] and not internal:
-                raise bad("A política da equipe exige aprovação para concluir uma entrega. Use “Enviar para aprovação”.",
-                          {"status": "Exige aprovação."}, code="exige_aprovacao")
+                raise bad(_t("A política da equipe exige aprovação para concluir uma entrega. Use “Enviar para aprovação”."),
+                          {"status": _t("Exige aprovação.")}, code="exige_aprovacao")
             a["progress"] = 100
             if not a.get("actual_end"):
                 a["actual_end"] = today
             if a.get("actual_end") > today:
-                raise bad("A data real de conclusão não pode estar no futuro.", {"actual_end": "Data futura."})
+                raise bad(_t("A data real de conclusão não pode estar no futuro."), {"actual_end": _t("Data futura.")})
             if a.get("actual_start") and a["actual_start"] > a["actual_end"]:
-                raise bad("Início real não pode ser posterior à conclusão real.", {"actual_start": "Posterior à conclusão."})
+                raise bad(_t("Início real não pode ser posterior à conclusão real."), {"actual_start": _t("Posterior à conclusão.")})
             if a.get("planned_end") and a["actual_end"] > a["planned_end"] and not (a.get("delay_justification") or "").strip():
-                raise bad("Esta entrega está sendo concluída após o prazo planejado. Registre a justificativa do atraso.",
-                          {"delay_justification": "Justificativa obrigatória para conclusão após o prazo."}, code="justificativa_obrigatoria")
+                raise bad(_t("Esta entrega está sendo concluída após o prazo planejado. Registre a justificativa do atraso."),
+                          {"delay_justification": _t("Justificativa obrigatória para conclusão após o prazo.")}, code="justificativa_obrigatoria")
         if st != "concluida" and a.get("progress") == 100 and (not old or old.get("progress") != 100) and st in ("nao_iniciada", "em_andamento"):
             a["status"] = "em_revisao" if st == "em_andamento" else st
         if st in ("em_andamento", "em_revisao") and not a.get("actual_start") and old_status == "nao_iniciada":
             a["actual_start"] = min(today, a.get("actual_end") or today)
         if a.get("actual_start") and a["actual_start"] > today:
-            raise bad("O início real não pode estar no futuro.", {"actual_start": "Data futura."})
+            raise bad(_t("O início real não pode estar no futuro."), {"actual_start": _t("Data futura.")})
         if st != "concluida" and a.get("actual_end") and old and old_status == "concluida":
             a["actual_end"] = None  # reabertura: a data real de conclusão deixa de valer (fica no histórico de auditoria)
         if st != "concluida" and a.get("actual_end") and (not old or (old_status != "concluida" and a["actual_end"] != old.get("actual_end"))):
-            raise bad("Para registrar a conclusão real, altere a situação para Concluída.", {"actual_end": "Atividade não concluída."})
+            raise bad(_t("Para registrar a conclusão real, altere a situação para Concluída."), {"actual_end": _t("Atividade não concluída.")})
         # linha de base: definida na primeira vez em que há datas planejadas; nunca alterada em silêncio
         if not a.get("baseline_end") and a.get("planned_end"):
             a["baseline_start"], a["baseline_end"] = a.get("planned_start"), a["planned_end"]
@@ -96,13 +97,13 @@ class Activities(Resource):
         # alteração de conteúdo após aprovação exige nova aprovação (configurável)
         if old and old["approval_status"] == "aprovada" and gov["reapprove_on_change"] and not internal:
             if any((a.get(k) or "") != (old.get(k) or "") for k in CONTENT_FIELDS):
-                invalidate_approval(ctx, a, "Conteúdo alterado após a aprovação")
+                invalidate_approval(ctx, a, _t("Conteúdo alterado após a aprovação"))
         if old and any((a.get(k) or "") != (old.get(k) or "") for k in CONTENT_FIELDS):
             a["content_version"] = (old["content_version"] or 1) + 1
         if a.get("wbs_id"):
             w = db.one("SELECT season_id FROM wbs_elements WHERE id=?", (a["wbs_id"],))
             if w and w["season_id"] != a["season_id"]:
-                raise bad("O elemento da EAP pertence a outra temporada.", {"wbs_id": "Temporada diferente."})
+                raise bad(_t("O elemento da EAP pertence a outra temporada."), {"wbs_id": _t("Temporada diferente.")})
 
     def after_save(self, ctx, a, old):
         db = ctx.db
@@ -113,11 +114,11 @@ class Activities(Resource):
                 db.ex("INSERT INTO activity_participants (activity_id, user_id) VALUES (?,?)", (a["id"], u))
         if old and a["status"] == "bloqueada" and old["status"] != "bloqueada":
             for uid in set(staff_ids(db) + ([a["owner_id"]] if a["owner_id"] else [])):
-                notify(db, uid, "bloqueada", f"Atividade bloqueada: {a['title']}", a.get("notes") or "Verifique o impedimento e a próxima ação.",
+                notify(db, uid, "bloqueada", _t("Atividade bloqueada: {0}", a['title']), a.get("notes") or _t("Verifique o impedimento e a próxima ação."),
                        "activities", a["id"], f"blocked:{a['id']}:{a['updated_at']}")
         if old and a["owner_id"] and a["owner_id"] != old["owner_id"] and a["owner_id"] != ctx.uid:
-            notify(db, a["owner_id"], "atribuicao", f"Você é responsável por: {a['title']}",
-                   f"Prazo planejado: {fmt_date(a['planned_end'])}", "activities", a["id"], f"owner:{a['id']}:{a['updated_at']}")
+            notify(db, a["owner_id"], "atribuicao", _t("Você é responsável por: {0}", a['title']),
+                   _t("Prazo planejado: {0}", fmt_date(a['planned_end'])), "activities", a["id"], f"owner:{a['id']}:{a['updated_at']}")
 
     def before_delete(self, ctx, a):
         if ctx.role not in STAFF:
@@ -127,35 +128,36 @@ class Activities(Resource):
         return expand_activities(ctx.db, rows)
 
 
-ACT = Activities("activities", "activities", "Atividade", {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "area_id": F("ref", "Área responsável", ref="areas", filter=True),
-    "wbs_id": F("ref", "Elemento da EAP", ref="wbs_elements", filter=True),
-    "seq": F("int", "Nº no cronograma", min=0, max=100000),
-    "title": F("text", "Título", required=True, max=200),
-    "description": F("long", "Descrição detalhada"),
-    "objective": F("long", "Objetivo"),
-    "category": F("text", "Categoria", max=120, filter=True),
-    "priority": F("text", "Prioridade", max=40, filter=True),
-    "owner_id": F("ref", "Responsável principal", ref="users", filter=True),
-    "status": F("enum", "Situação", options=STATUS, default="nao_iniciada", filter=True),
-    "progress": F("int", "Progresso (%)", min=0, max=100, default=0),
-    "planned_start": F("date", "Início planejado"),
-    "planned_end": F("date", "Prazo final planejado"),
-    "actual_start": F("date", "Início real"),
-    "actual_end": F("date", "Conclusão real"),
-    "is_milestone": F("bool", "Marco de entrega"),
-    "completion_criteria": F("long", "Critérios de conclusão"),
-    "notes": F("long", "Observações"),
-    "next_action": F("long", "Próxima ação", max=2000),
-    "milestone_ref": F("text", "Marco ou objetivo relacionado", max=200),
-    "alert_days": F("int", "Antecedência do alerta (dias)", min=0, max=365),
-    "delay_justification": F("long", "Justificativa de atraso", max=4000),
-    "delay_impact": F("long", "Impacto do atraso", max=4000),
-    "recovery_plan": F("long", "Plano de recuperação", max=4000),
-    "recovery_owner_id": F("ref", "Responsável pela recuperação", ref="users"),
-    "forecast_end": F("date", "Nova previsão de término"),
-    "custom": F("json", "Campos personalizados"),
+ACT = Activities("activities", "activities", _t("Atividade"), {
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "area_id": F("ref", _t("Área responsável"), ref="areas", filter=True),
+    "wbs_id": F("ref", _t("Elemento da EAP"), ref="wbs_elements", filter=True),
+    "seq": F("int", _t("Nº no cronograma"), min=0, max=100000),
+    "title": F("text", _t("Título"), required=True, max=200),
+    "description": F("long", _t("Descrição detalhada")),
+    "objective": F("long", _t("Objetivo")),
+    "category": F("text", _t("Categoria"), max=120, filter=True),
+    "priority": F("text", _t("Prioridade"), max=40, filter=True),
+    "owner_id": F("ref", _t("Responsável principal"), ref="users", filter=True),
+    "status": F("enum", _t("Situação"), options=STATUS, default="nao_iniciada", filter=True),
+    "progress": F("int", _t("Progresso (%)"), min=0, max=100, default=0),
+    "duration_days": F("int", _t("Duração necessária (dias)"), min=0, max=3650),
+    "planned_start": F("date", _t("Início planejado")),
+    "planned_end": F("date", _t("Prazo final planejado")),
+    "actual_start": F("date", _t("Início real")),
+    "actual_end": F("date", _t("Conclusão real")),
+    "is_milestone": F("bool", _t("Marco de entrega")),
+    "completion_criteria": F("long", _t("Critérios de conclusão")),
+    "notes": F("long", _t("Observações")),
+    "next_action": F("long", _t("Próxima ação"), max=2000),
+    "milestone_ref": F("text", _t("Marco ou objetivo relacionado"), max=200),
+    "alert_days": F("int", _t("Antecedência do alerta (dias)"), min=0, max=365),
+    "delay_justification": F("long", _t("Justificativa de atraso"), max=4000),
+    "delay_impact": F("long", _t("Impacto do atraso"), max=4000),
+    "recovery_plan": F("long", _t("Plano de recuperação"), max=4000),
+    "recovery_owner_id": F("ref", _t("Responsável pela recuperação"), ref="users"),
+    "forecast_end": F("date", _t("Nova previsão de término")),
+    "custom": F("json", _t("Campos personalizados")),
 }, season=True, order="COALESCE(planned_start, planned_end, '9999'), seq, title", search=("title", "description", "notes"))
 
 
@@ -278,9 +280,7 @@ def schedule_conflicts(acts, deps, today=None):
                 "predecessor_title": p["title"], "successor_title": s["title"]}
         if cur and cur < minimum and s["status"] != "concluida":
             out.append({**base, "kind": "conflito", "days": days_between(cur, minimum),
-                        "message": f"“{s['title']}” deveria {'iniciar' if field == 'start' else 'terminar'} a partir de {fmt_date(minimum)} "
-                                   f"por depender de “{p['title']}” ({dp['type']}{'%+d' % dp['lag_days'] if dp['lag_days'] else ''}), "
-                                   f"mas está planejada para {fmt_date(cur)}."})
+                        "message": _t("“{0}” deveria {1} a partir de {2} por depender de “{3}” ({4}{5}), mas está planejada para {6}.", s['title'], 'iniciar' if field == 'start' else 'terminar', fmt_date(minimum), p['title'], dp['type'], '%+d' % dp['lag_days'] if dp['lag_days'] else '', fmt_date(cur))})
         elif today and p["status"] not in DONE and s["status"] not in DONE:
             expected = p.get("forecast_end") or p.get("planned_end")
             if dp["type"] in ("FS", "FF") and expected and (today > p["planned_end"] if p.get("planned_end") else False):
@@ -288,7 +288,7 @@ def schedule_conflicts(acts, deps, today=None):
                 need = add_days(eff, dp["lag_days"])
                 if cur and need > cur:
                     out.append({**base, "kind": "risco", "days": days_between(cur, need),
-                                "message": f"“{p['title']}” está atrasada e pode comprometer “{s['title']}” (dependência {dp['type']})."})
+                                "message": _t("“{0}” está atrasada e pode comprometer “{1}” (dependência {2}).", p['title'], s['title'], dp['type'])})
     return out
 
 
@@ -376,7 +376,7 @@ def propose_shift(acts, deps, changed_id):
             if need > delta:
                 delta = need
             if need > 0:
-                reasons.append(f"{dp['type']} de “{acts[dp['predecessor_id']]['title']}”")
+                reasons.append(_t("{0} de “{1}”", dp['type'], acts[dp['predecessor_id']]['title']))
         if delta > 0:
             ns, ne = add_days(s, delta), add_days(e, delta)
             proposed[i] = (ns, ne)
@@ -397,7 +397,7 @@ def list_activities(ctx):
     if ctx.role == "juiz":
         jv = get_setting(ctx.db, "judge_view")["modules"]
         if not (jv.get("planejamento") or jv.get("gantt") or jv.get("raci")):
-            raise forbidden("Este módulo não está disponível para o perfil de juiz.")
+            raise forbidden(_t("Este módulo não está disponível para o perfil de juiz."))
     conds, ps = [], []
     q = ctx.query
     if q.get("from"):
@@ -460,15 +460,15 @@ def update_activity(ctx):
 def delete_activity(ctx):
     a = ACT.raw(ctx.db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     n_dep = ctx.db.val("SELECT COUNT(*) FROM dependencies WHERE predecessor_id=? OR successor_id=?", (a["id"], a["id"]))
     n_ev = ctx.db.val("SELECT COUNT(*) FROM evidence_activities WHERE activity_id=?", (a["id"],))
     n_ap = ctx.db.val("SELECT COUNT(*) FROM approvals WHERE activity_id=? AND action IN ('aprovada','reprovada')", (a["id"],))
     if (n_dep or n_ev or n_ap) and ctx.query.get("cascade") != "1":
-        refs = [r for r in ({"label": "dependência(s) no cronograma", "count": n_dep}, {"label": "evidência(s) vinculada(s)", "count": n_ev},
-                            {"label": "decisão(ões) de aprovação", "count": n_ap}) if r["count"]]
-        raise conflict("Esta atividade possui vínculos (" + ", ".join(f"{r['count']} {r['label']}" for r in refs) +
-                       "). Você pode arquivá-la (recomendado) ou confirmar a exclusão removendo também os vínculos.",
+        refs = [r for r in ({"label": _t("dependência(s) no cronograma"), "count": n_dep}, {"label": _t("evidência(s) vinculada(s)"), "count": n_ev},
+                            {"label": _t("decisão(ões) de aprovação"), "count": n_ap}) if r["count"]]
+        raise conflict(_t("Esta atividade possui vínculos ({0}). Você pode arquivá-la (recomendado) ou confirmar a exclusão removendo também os vínculos.",
+                          ", ".join(f"{r['count']} {rnd(r['label'])}" for r in refs)),
                        code="vinculos_existentes", references=refs, can_archive=True, can_cascade=True)
     ctx.db.ex("DELETE FROM dependencies WHERE predecessor_id=? OR successor_id=?", (a["id"], a["id"]))
     ctx.db.ex("DELETE FROM evidence_activities WHERE activity_id=?", (a["id"],))
@@ -486,11 +486,11 @@ route("POST", "/api/activities/{id}/desarquivar")(lambda ctx: ACT.set_archived(c
 def duplicate_activity(ctx):
     a = ACT.raw(ctx.db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     keep = ("season_id", "area_id", "wbs_id", "description", "objective", "category", "priority", "owner_id",
             "planned_start", "planned_end", "is_milestone", "completion_criteria", "milestone_ref", "alert_days")
     body = {k: ACT.fields[k].out(a[k]) for k in keep}
-    body["title"] = (a["title"] + " (cópia)")[:200]
+    body["title"] = (a["title"] + _t(" (cópia)"))[:200]
     body["participants"] = [p["user_id"] for p in ctx.db.q("SELECT user_id FROM activity_participants WHERE activity_id=?", (a["id"],))]
     ctx.body = body
     return ACT.create(ctx, body)
@@ -502,12 +502,12 @@ def register_delay(ctx):
     db = ctx.db
     a = ACT.raw(db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     if not ACT.can_write(ctx, a):
         raise forbidden()
     just = str(ctx.body.get("justification") or "").strip()
     if not just:
-        raise bad("A justificativa é obrigatória para registrar um atraso.", {"justification": "Campo obrigatório."}, code="justificativa_obrigatoria")
+        raise bad(_t("A justificativa é obrigatória para registrar um atraso."), {"justification": _t("Campo obrigatório.")}, code="justificativa_obrigatoria")
     f = ACT.fields
     data = {"delay_justification": f["delay_justification"].parse(db, "justification", just),
             "delay_impact": f["delay_impact"].parse(db, "impact", ctx.body.get("impact")),
@@ -515,7 +515,7 @@ def register_delay(ctx):
             "recovery_owner_id": f["recovery_owner_id"].parse(db, "recovery_owner_id", ctx.body.get("recovery_owner_id")),
             "forecast_end": f["forecast_end"].parse(db, "forecast_end", ctx.body.get("forecast_end"))}
     if data["forecast_end"] and a["planned_end"] and data["forecast_end"] < a["planned_end"]:
-        raise bad("A nova previsão não pode ser anterior ao prazo planejado original.", {"forecast_end": "Anterior ao prazo planejado."})
+        raise bad(_t("A nova previsão não pode ser anterior ao prazo planejado original."), {"forecast_end": _t("Anterior ao prazo planejado.")})
     db.insert("delay_records", {"id": new_id(), "activity_id": a["id"], "registered_by": ctx.uid, "registered_at": now_iso(),
                                 "planned_end": a["planned_end"], "justification": data["delay_justification"], "impact": data["delay_impact"],
                                 "recovery_plan": data["recovery_plan"], "recovery_owner_id": data["recovery_owner_id"], "forecast_end": data["forecast_end"]})
@@ -525,7 +525,7 @@ def register_delay(ctx):
     audit(ctx, "registrar_atraso", "activities", a["id"], a["title"], before=ACT.ser(a), after=ACT.ser(new))
     for uid in staff_ids(db):
         if uid != ctx.uid:
-            notify(db, uid, "atraso_registrado", f"Atraso registrado: {a['title']}", just[:300], "activities", a["id"], f"delayreg:{a['id']}:{new['updated_at']}")
+            notify(db, uid, "atraso_registrado", _t("Atraso registrado: {0}", a['title']), just[:300], "activities", a["id"], f"delayreg:{a['id']}:{new['updated_at']}")
     out = ACT.get(ctx, a["id"])
     out["impacts"] = _impacts(ctx, out)
     return out
@@ -535,10 +535,10 @@ def register_delay(ctx):
 def reset_baseline(ctx):
     a = ACT.raw(ctx.db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     reason = str(ctx.body.get("reason") or "").strip()
     if not reason:
-        raise bad("Informe o motivo para redefinir a linha de base.", {"reason": "Campo obrigatório."})
+        raise bad(_t("Informe o motivo para redefinir a linha de base."), {"reason": _t("Campo obrigatório.")})
     ctx.db.ex("UPDATE activities SET baseline_start=planned_start, baseline_end=planned_end, updated_at=?, version=version+1 WHERE id=?", (now_iso(), a["id"]))
     new = ACT.raw(ctx.db, a["id"])
     audit(ctx, "redefinir_linha_base", "activities", a["id"], f"{a['title']} — {reason}", before=ACT.ser(a), after=ACT.ser(new))
@@ -550,10 +550,10 @@ def _dep_parse(ctx, existing=None):
     b = ctx.body
     t = b.get("type", existing["type"] if existing else "FS")
     if t not in DEP_LABEL:
-        raise bad("Tipo de dependência inválido (use FS, SS, FF ou SF).", {"type": "Tipo inválido."})
+        raise bad(_t("Tipo de dependência inválido (use FS, SS, FF ou SF)."), {"type": _t("Tipo inválido.")})
     lag = b.get("lag_days", existing["lag_days"] if existing else 0)
     if isinstance(lag, bool) or not isinstance(lag, int) or not -365 <= lag <= 365:
-        raise bad("Defasagem inválida: informe um número inteiro de dias entre -365 e 365.", {"lag_days": "Valor inválido."})
+        raise bad(_t("Defasagem inválida: informe um número inteiro de dias entre -365 e 365."), {"lag_days": _t("Valor inválido.")})
     return t, lag
 
 
@@ -562,16 +562,16 @@ def create_dependency(ctx):
     db = ctx.db
     p, s = ACT.raw(db, str(ctx.body.get("predecessor_id"))), ACT.raw(db, str(ctx.body.get("successor_id")))
     if not p or not s:
-        raise bad("Selecione a atividade predecessora e a sucessora.")
+        raise bad(_t("Selecione a atividade predecessora e a sucessora."))
     if p["id"] == s["id"]:
-        raise bad("Uma atividade não pode depender dela própria.", code="auto_dependencia")
+        raise bad(_t("Uma atividade não pode depender dela própria."), code="auto_dependencia")
     if p["season_id"] != s["season_id"]:
-        raise bad("As atividades pertencem a temporadas diferentes.")
+        raise bad(_t("As atividades pertencem a temporadas diferentes."))
     t, lag = _dep_parse(ctx)
     if db.one("SELECT 1 FROM dependencies WHERE predecessor_id=? AND successor_id=?", (p["id"], s["id"])):
-        raise conflict("Já existe uma dependência entre estas duas atividades. Edite a existente.", code="dependencia_duplicada")
+        raise conflict(_t("Já existe uma dependência entre estas duas atividades. Edite a existente."), code="dependencia_duplicada")
     if would_cycle(db, p["id"], s["id"]):
-        raise conflict(f"Dependência circular: “{p['title']}” já depende (direta ou indiretamente) de “{s['title']}”.", code="dependencia_circular")
+        raise conflict(_t("Dependência circular: “{0}” já depende (direta ou indiretamente) de “{1}”.", p['title'], s['title']), code="dependencia_circular")
     dep = {"id": new_id(), "predecessor_id": p["id"], "successor_id": s["id"], "type": t, "lag_days": lag, "created_by": ctx.uid, "created_at": now_iso()}
     db.insert("dependencies", dep)
     audit(ctx, "criar", "dependencies", dep["id"], f"{p['title']} → {s['title']} ({t}{'%+d' % lag if lag else ''})", after=dep)
@@ -586,11 +586,11 @@ def update_dependency(ctx):
     db = ctx.db
     dep = db.one("SELECT * FROM dependencies WHERE id=?", (ctx.params["id"],))
     if not dep:
-        raise not_found("Dependência")
+        raise not_found(_t("Dependência"))
     t, lag = _dep_parse(ctx, dep)
     db.ex("UPDATE dependencies SET type=?, lag_days=? WHERE id=?", (t, lag, dep["id"]))
     new = db.one("SELECT * FROM dependencies WHERE id=?", (dep["id"],))
-    audit(ctx, "alterar", "dependencies", dep["id"], "Dependência alterada", before=dep, after=new)
+    audit(ctx, "alterar", "dependencies", dep["id"], _t("Dependência alterada"), before=dep, after=new)
     p = ACT.raw(db, dep["predecessor_id"])
     acts, deps = load_graph(db, p["season_id"])
     new["conflicts"] = [c for c in schedule_conflicts(acts, deps) if c["dep_id"] == dep["id"]]
@@ -602,9 +602,9 @@ def update_dependency(ctx):
 def delete_dependency(ctx):
     dep = ctx.db.one("SELECT * FROM dependencies WHERE id=?", (ctx.params["id"],))
     if not dep:
-        raise not_found("Dependência")
+        raise not_found(_t("Dependência"))
     ctx.db.ex("DELETE FROM dependencies WHERE id=?", (dep["id"],))
-    audit(ctx, "excluir", "dependencies", dep["id"], "Dependência removida", before=dep)
+    audit(ctx, "excluir", "dependencies", dep["id"], _t("Dependência removida"), before=dep)
     return {"ok": True}
 
 
@@ -613,7 +613,7 @@ def gantt(ctx):
     judge_module_guard(ctx, "gantt")
     db, sid = ctx.db, ctx.query.get("season_id")
     if not sid:
-        raise bad("Informe a temporada.")
+        raise bad(_t("Informe a temporada."))
     acts, deps = load_graph(db, sid)
     floats, critical = critical_path(acts, deps)
     today = today_local(db)
@@ -630,7 +630,7 @@ def gantt(ctx):
 def shift_proposal(ctx):
     a = ACT.raw(ctx.db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     acts, deps = load_graph(ctx.db, a["season_id"])
     return {"changes": propose_shift(acts, deps, a["id"])}
 
@@ -641,9 +641,9 @@ def apply_schedule(ctx):
     changes = ctx.body.get("changes")
     reason = str(ctx.body.get("reason") or "").strip()
     if not isinstance(changes, list) or not changes:
-        raise bad("Nenhum ajuste informado.")
+        raise bad(_t("Nenhum ajuste informado."))
     if not reason:
-        raise bad("Informe o motivo do ajuste do cronograma.", {"reason": "Campo obrigatório."})
+        raise bad(_t("Informe o motivo do ajuste do cronograma."), {"reason": _t("Campo obrigatório.")})
     out = []
     ctx._skip_parts = True
     for ch in changes:
@@ -652,7 +652,7 @@ def apply_schedule(ctx):
             body["planned_start"] = ch["new_start"]
         ctx.body = body
         out.append(ACT.update(ctx, str(ch.get("id")), body, action="ajuste_cronograma"))
-    audit(ctx, "ajuste_cronograma", "schedule", None, f"{len(out)} atividade(s) reprogramada(s): {reason}")
+    audit(ctx, "ajuste_cronograma", "schedule", None, _t("{0} atividade(s) reprogramada(s): {1}", len(out), reason))
     return {"items": out}
 
 
@@ -664,11 +664,11 @@ def _eligible_users(db):
 def approver_block_reason(a, u):
     """Motivo pelo qual o usuário NÃO pode ser aprovador final (None = pode)."""
     if u["role"] == "juiz":
-        return "juiz", "O perfil de juiz é somente leitura e não pode aprovar entregas."
+        return "juiz", _t("O perfil de juiz é somente leitura e não pode aprovar entregas.")
     if u["is_teacher"]:
-        return "aprovador_professor", "O professor técnico não pode ser o aprovador final de nenhuma atividade."
+        return "aprovador_professor", _t("O professor técnico não pode ser o aprovador final de nenhuma atividade.")
     if a.get("created_by") and a["created_by"] == u["id"]:
-        return "aprovador_criador", "O criador da atividade não pode aprovar a própria entrega."
+        return "aprovador_criador", _t("O criador da atividade não pode aprovar a própria entrega.")
     return None
 
 
@@ -677,26 +677,26 @@ def raci_alerts(db, a, assignments, users=None, actives=None):
     alerts = []
     roles = list(assignments.values())
     if "R" not in roles:
-        alerts.append({"code": "sem_responsavel", "level": "erro", "message": "Sem responsável pela execução (R)."})
+        alerts.append({"code": "sem_responsavel", "level": "erro", "message": _t("Sem responsável pela execução (R).")})
     approver = next((u for u, r in assignments.items() if r == "A"), None)
     if not approver:
-        alerts.append({"code": "sem_aprovador", "level": "erro", "message": "Sem aprovador final (A)."})
+        alerts.append({"code": "sem_aprovador", "level": "erro", "message": _t("Sem aprovador final (A).")})
     else:
         u = users.get(approver)
-        blk = approver_block_reason(a, u) if u else ("inexistente", "Aprovador não encontrado.")
+        blk = approver_block_reason(a, u) if u else ("inexistente", _t("Aprovador não encontrado."))
         if blk:
             alerts.append({"code": blk[0], "level": "erro", "message": blk[1]})
         elif not u["active"]:
-            alerts.append({"code": "aprovador_inativo", "level": "erro", "message": f"O aprovador {u['name']} está desativado."})
+            alerts.append({"code": "aprovador_inativo", "level": "erro", "message": _t("O aprovador {0} está desativado.", u['name'])})
         elif not u["password_hash"]:
-            alerts.append({"code": "aprovador_sem_acesso", "level": "aviso", "message": f"{u['name']} ainda não possui acesso à plataforma para registrar a aprovação."})
+            alerts.append({"code": "aprovador_sem_acesso", "level": "aviso", "message": _t("{0} ainda não possui acesso à plataforma para registrar a aprovação.", u['name'])})
     if "C" not in roles:
-        alerts.append({"code": "sem_consultados", "level": "info", "message": "Nenhuma pessoa consultada (C)."})
+        alerts.append({"code": "sem_consultados", "level": "info", "message": _t("Nenhuma pessoa consultada (C).")})
     if actives is None:
         actives = [u for u in users.values() if u["active"] and u["role"] != "juiz"]
     omitted = [u["name"] for u in actives if u["id"] not in assignments]
     if omitted and not (a.get("raci_exception") or "").strip():
-        alerts.append({"code": "omitidos", "level": "aviso", "message": "Integrantes ativos sem ciência desta atividade: " + ", ".join(omitted) + "."})
+        alerts.append({"code": "omitidos", "level": "aviso", "message": _t("Integrantes ativos sem ciência desta atividade: {0}.", ", ".join(omitted))})
     return alerts
 
 
@@ -734,7 +734,7 @@ def save_raci(ctx):
     db = ctx.db
     a = ACT.raw(db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     raw = ctx.body.get("assignments")
     if not isinstance(raw, dict):
         raise bad("Informe as atribuições no formato {usuário: papel}.")
@@ -744,25 +744,25 @@ def save_raci(ctx):
         if role in (None, ""):
             continue
         if role not in ("R", "A", "C", "I"):
-            raise bad("Papel RACI inválido (use R, A, C ou I).")
+            raise bad(_t("Papel RACI inválido (use R, A, C ou I)."))
         u = users.get(uid)
         if not u:
-            raise bad("Integrante não encontrado.")
+            raise bad(_t("Integrante não encontrado."))
         if u["role"] == "juiz":
-            raise bad("Juízes não participam da matriz RACI.")
+            raise bad(_t("Juízes não participam da matriz RACI."))
         assign[uid] = role
     approvers = [u for u, r in assign.items() if r == "A"]
     if len(approvers) > 1:
-        raise bad("Cada atividade deve ter um único aprovador final (A).", code="varios_aprovadores")
+        raise bad(_t("Cada atividade deve ter um único aprovador final (A)."), code="varios_aprovadores")
     if approvers:
         blk = approver_block_reason(a, users[approvers[0]])
         if blk:
             raise _log_blocked(ctx, a, blk[0], blk[1])
         if not users[approvers[0]]["active"]:
-            raise bad("O aprovador selecionado está desativado.")
+            raise bad(_t("O aprovador selecionado está desativado."))
     before = {r["user_id"]: r["role"] for r in db.q("SELECT * FROM raci WHERE activity_id=?", (a["id"],))}
     exception = ctx.body.get("raci_exception", a["raci_exception"])
-    exception = F("long", "Justificativa da exceção", max=2000).parse(db, "raci_exception", exception)
+    exception = F("long", _t("Justificativa da exceção"), max=2000).parse(db, "raci_exception", exception)
     db.ex("DELETE FROM raci WHERE activity_id=?", (a["id"],))
     for uid, role in assign.items():
         db.ex("INSERT INTO raci (activity_id, user_id, role) VALUES (?,?,?)", (a["id"], uid, role))
@@ -773,8 +773,8 @@ def save_raci(ctx):
           after={"raci": {names.get(k, k): v for k, v in assign.items()}, "raci_exception": exception})
     for uid, role in assign.items():
         if before.get(uid) != role and uid != ctx.uid and role in ("R", "A"):
-            notify(db, uid, "raci", f"Nova responsabilidade em “{a['title']}”",
-                   "Você é " + ("responsável pela execução (R)." if role == "R" else "aprovador final (A)."), "activities", a["id"], f"raci:{a['id']}:{uid}:{role}:{now_iso()[:16]}")
+            notify(db, uid, "raci", _t("Nova responsabilidade em “{0}”", a['title']),
+                   (_t("Você é responsável pela execução (R).") if role == "R" else _t("Você é aprovador final (A).")), "activities", a["id"], f"raci:{a['id']}:{uid}:{role}:{now_iso()[:16]}")
     a2 = ACT.raw(db, a["id"])
     return {"id": a["id"], "raci": assign, "raci_exception": exception, "alerts": raci_alerts(db, a2, assign, users)}
 
@@ -792,7 +792,7 @@ def raci_inform_all(ctx):
             continue
         for u in actives:
             n += db.ex("INSERT OR IGNORE INTO raci (activity_id, user_id, role) VALUES (?,?,'I')", (a["id"], u["id"])).rowcount
-    audit(ctx, "alterar_raci", "raci", None, f"{n} atribuição(ões) “Informado” adicionada(s) automaticamente")
+    audit(ctx, "alterar_raci", "raci", None, _t("{0} atribuição(ões) “Informado” adicionada(s) automaticamente", n))
     return {"added": n}
 
 
@@ -806,7 +806,7 @@ def invalidate_approval(ctx, a, reason):
                                 "content_version": a.get("content_version"), "comment": reason, "blocked_reason": None})
     approver = ctx.db.one("SELECT user_id FROM raci WHERE activity_id=? AND role='A'", (a["id"],))
     if approver:
-        notify(ctx.db, approver["user_id"], "aprovacao", f"Aprovação invalidada: {a['title']}",
+        notify(ctx.db, approver["user_id"], "aprovacao", _t("Aprovação invalidada: {0}", a['title']),
                f"{reason}. Será necessária nova aprovação.", "activities", a["id"], f"invalid:{a['id']}:{now_iso()}")
 
 
@@ -824,14 +824,14 @@ def content_changed(ctx, activity_id, reason):
 def _eligible_approver(db, a):
     row = db.one("SELECT u.* FROM raci r JOIN users u ON u.id=r.user_id WHERE r.activity_id=? AND r.role='A'", (a["id"],))
     if not row:
-        return None, "Não há aprovador final (A) definido na matriz RACI."
+        return None, _t("Não há aprovador final (A) definido na matriz RACI.")
     blk = approver_block_reason(a, row)
     if blk:
         return None, blk[1]
     if not row["active"] or row["deleted_at"]:
-        return None, f"O aprovador {row['name']} está desativado."
+        return None, _t("O aprovador {0} está desativado.", row['name'])
     if not row["password_hash"]:
-        return None, f"O aprovador {row['name']} ainda não possui acesso à plataforma."
+        return None, _t("O aprovador {0} ainda não possui acesso à plataforma.", row['name'])
     return row, None
 
 
@@ -840,32 +840,32 @@ def submit_for_approval(ctx):
     db = ctx.db
     a = ACT.raw(db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     if ctx.role not in STAFF and not is_assignee(db, a, ctx.uid):
-        raise forbidden("Somente quem executa a atividade (ou a gestão) pode submetê-la para aprovação.")
+        raise forbidden(_t("Somente quem executa a atividade (ou a gestão) pode submetê-la para aprovação."))
     if a["approval_status"] in ("aguardando_aprovacao", "reenviada"):
-        raise conflict("Esta atividade já aguarda aprovação.")
+        raise conflict(_t("Esta atividade já aguarda aprovação."))
     if a["approval_status"] == "aprovada":
-        raise conflict("Esta atividade já está aprovada.")
+        raise conflict(_t("Esta atividade já está aprovada."))
     if a["status"] == "cancelada":
-        raise conflict("Atividades canceladas não podem ser submetidas.")
+        raise conflict(_t("Atividades canceladas não podem ser submetidas."))
     if not db.one("SELECT 1 FROM raci WHERE activity_id=? AND role='R'", (a["id"],)) and not a["owner_id"]:
-        raise conflict("Defina um responsável pela execução antes de submeter.", code="sem_responsavel")
+        raise conflict(_t("Defina um responsável pela execução antes de submeter."), code="sem_responsavel")
     approver, why = _eligible_approver(db, a)
     if approver and approver["id"] == ctx.uid:
-        approver, why = None, "Quem submete a entrega não pode ser o seu aprovador."
+        approver, why = None, _t("Quem submete a entrega não pode ser o seu aprovador.")
     if not approver:
-        msg = f"Submissão bloqueada: {why} Peça a um administrador que atribua outro integrante autorizado como aprovador."
+        msg = _t("Submissão bloqueada: {0} Peça a um administrador que atribua outro integrante autorizado como aprovador.", why)
         for uid in staff_ids(db):
-            notify(db, uid, "aprovacao", f"Sem aprovador elegível: {a['title']}", why, "activities", a["id"], f"noappr:{a['id']}:{now_iso()[:13]}")
-        audit(ctx, "tentativa_bloqueada", "activities", a["id"], f"{a['title']} — submissão sem aprovador elegível: {why}")
+            notify(db, uid, "aprovacao", _t("Sem aprovador elegível: {0}", a['title']), why, "activities", a["id"], f"noappr:{a['id']}:{now_iso()[:13]}")
+        audit(ctx, "tentativa_bloqueada", "activities", a["id"], _t("{0} — submissão sem aprovador elegível: {1}", a['title'], why))
         db.commit()
         raise conflict(msg, code="sem_aprovador_elegivel")
     today = today_local(db)
     just = str(ctx.body.get("delay_justification") or a["delay_justification"] or "").strip()
     if a["planned_end"] and today > a["planned_end"] and not just:
-        raise bad("A entrega está sendo submetida após o prazo planejado. Registre a justificativa do atraso.",
-                  {"delay_justification": "Justificativa obrigatória."}, code="justificativa_obrigatoria")
+        raise bad(_t("A entrega está sendo submetida após o prazo planejado. Registre a justificativa do atraso."),
+                  {"delay_justification": _t("Justificativa obrigatória.")}, code="justificativa_obrigatoria")
     resend = a["approval_status"] == "reprovada"
     new_status = "reenviada" if resend else "aguardando_aprovacao"
     db.ex("UPDATE activities SET approval_status=?, status='aguardando_aprovacao', submitted_by=?, submitted_at=?, delay_justification=?, "
@@ -873,9 +873,9 @@ def submit_for_approval(ctx):
           (new_status, ctx.uid, now_iso(), just or None, today, now_iso(), a["id"]))
     db.insert("approvals", {"id": new_id(), "activity_id": a["id"], "action": "reenviada" if resend else "submetida", "user_id": ctx.uid, "at": now_iso(),
                             "content_version": a["content_version"], "comment": F("long", "Comentário", max=4000).parse(db, "comment", ctx.body.get("comment")), "blocked_reason": None})
-    notify(db, approver["id"], "aprovacao", f"Aprovação pendente: {a['title']}", f"Enviada por {ctx.user['name']} (versão {a['content_version']}).",
+    notify(db, approver["id"], "aprovacao", _t("Aprovação pendente: {0}", a['title']), _t("Enviada por {0} (versão {1}).", ctx.user['name'], a['content_version']),
            "activities", a["id"], f"submit:{a['id']}:{a['content_version']}:{now_iso()}")
-    audit(ctx, "submeter", "activities", a["id"], f"{a['title']} — versão {a['content_version']} enviada para {approver['name']}")
+    audit(ctx, "submeter", "activities", a["id"], _t("{0} — versão {1} enviada para {2}", a['title'], a['content_version'], approver['name']))
     return ACT.get(ctx, a["id"])
 
 
@@ -883,23 +883,23 @@ def _decide(ctx, approve):
     db = ctx.db
     a = ACT.raw(db, ctx.params["id"])
     if not a:
-        raise not_found("Atividade")
+        raise not_found(_t("Atividade"))
     u = ctx.user
     # Identidade e autoria vêm exclusivamente da sessão autenticada e do banco — nunca do corpo da requisição.
     is_a = db.one("SELECT 1 FROM raci WHERE activity_id=? AND user_id=? AND role='A'", (a["id"], u["id"]))
     if u["is_teacher"]:
-        raise _log_blocked(ctx, a, "aprovador_professor", "O professor técnico não pode aprovar ou reprovar entregas, mesmo com perfil de administrador.")
+        raise _log_blocked(ctx, a, "aprovador_professor", _t("O professor técnico não pode aprovar ou reprovar entregas, mesmo com perfil de administrador."))
     if a["created_by"] == u["id"]:
-        raise _log_blocked(ctx, a, "aprovador_criador", "O criador da atividade não pode aprovar a própria entrega.")
+        raise _log_blocked(ctx, a, "aprovador_criador", _t("O criador da atividade não pode aprovar a própria entrega."))
     if a["submitted_by"] == u["id"]:
-        raise _log_blocked(ctx, a, "aprovador_autor", "Quem submeteu a entrega não pode decidir sobre a própria submissão.")
+        raise _log_blocked(ctx, a, "aprovador_autor", _t("Quem submeteu a entrega não pode decidir sobre a própria submissão."))
     if not is_a:
-        raise _log_blocked(ctx, a, "nao_e_aprovador", "Somente o aprovador final (A) definido na matriz RACI pode decidir sobre esta entrega.")
+        raise _log_blocked(ctx, a, "nao_e_aprovador", _t("Somente o aprovador final (A) definido na matriz RACI pode decidir sobre esta entrega."))
     if a["approval_status"] not in ("aguardando_aprovacao", "reenviada"):
-        raise conflict("Esta atividade não está aguardando aprovação.", code="estado_invalido")
-    comment = F("long", "Comentário", max=4000).parse(db, "comment", ctx.body.get("comment"))
+        raise conflict(_t("Esta atividade não está aguardando aprovação."), code="estado_invalido")
+    comment = F("long", _t("Comentário"), max=4000).parse(db, "comment", ctx.body.get("comment"))
     if not approve and not comment:
-        raise bad("Informe o que precisa ser ajustado ao devolver a entrega.", {"comment": "Campo obrigatório."})
+        raise bad(_t("Informe o que precisa ser ajustado ao devolver a entrega."), {"comment": _t("Campo obrigatório.")})
     today = today_local(db)
     if approve:
         end = a["actual_end"] or today
@@ -910,9 +910,9 @@ def _decide(ctx, approve):
     db.insert("approvals", {"id": new_id(), "activity_id": a["id"], "action": "aprovada" if approve else "reprovada", "user_id": u["id"], "at": now_iso(),
                             "content_version": a["content_version"], "comment": comment, "blocked_reason": None})
     for uid in {a["submitted_by"], a["owner_id"]} - {None, u["id"]}:
-        notify(db, uid, "aprovacao", ("Entrega aprovada: " if approve else "Entrega devolvida para ajustes: ") + a["title"],
-               comment or f"Decisão de {u['name']}.", "activities", a["id"], f"decision:{a['id']}:{now_iso()}")
-    audit(ctx, "aprovar" if approve else "reprovar", "activities", a["id"], f"{a['title']} — versão {a['content_version']}")
+        notify(db, uid, "aprovacao", (_t("Entrega aprovada: ") if approve else _t("Entrega devolvida para ajustes: ")) + a["title"],
+               comment or _t("Decisão de {0}.", u['name']), "activities", a["id"], f"decision:{a['id']}:{now_iso()}")
+    audit(ctx, "aprovar" if approve else "reprovar", "activities", a["id"], _t("{0} — versão {1}", a['title'], a['content_version']))
     return ACT.get(ctx, a["id"])
 
 

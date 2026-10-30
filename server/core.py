@@ -1,4 +1,5 @@
 """Núcleo da API: erros, contexto, rotas, validação, CRUD genérico, auditoria e configurações."""
+from .i18n import _t
 import json
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +11,7 @@ from .db import new_id, now_iso
 ROLES = ("admin", "gestor", "membro", "juiz")
 STAFF = ("admin", "gestor")
 INTERNAL = ("admin", "gestor", "membro")
-ROLE_LABELS = {"admin": "Administrador", "gestor": "Gestor do time", "membro": "Integrante", "juiz": "Juiz (somente leitura)"}
+ROLE_LABELS = {"admin": _t("Administrador"), "gestor": _t("Gestor do time"), "membro": _t("Integrante"), "juiz": _t("Juiz (somente leitura)")}
 
 
 # ----------------------------------------------------------------------------- erros
@@ -29,7 +30,7 @@ def forbidden(message="Você não tem permissão para realizar esta operação."
 
 
 def not_found(what="Registro"):
-    return ApiError(404, "nao_encontrado", f"{what} não encontrado(a).")
+    return ApiError(404, "nao_encontrado", _t("{0} não encontrado(a).", what))
 
 
 def conflict(message, **extra):
@@ -69,7 +70,7 @@ class Ctx:
         try:
             v = int(v)
         except ValueError:
-            raise bad(f"Parâmetro '{name}' inválido.")
+            raise bad(_t("Parâmetro '{0}' inválido.", name))
         if lo is not None:
             v = max(lo, v)
         if hi is not None:
@@ -104,8 +105,8 @@ def match_route(method, path):
             if r["method"] == method:
                 return r, m.groupdict()
     if found_path:
-        raise ApiError(405, "metodo_nao_permitido", "Método não permitido para este endereço.")
-    raise ApiError(404, "nao_encontrado", "Endereço não encontrado.")
+        raise ApiError(405, "metodo_nao_permitido", _t("Método não permitido para este endereço."))
+    raise ApiError(404, "nao_encontrado", _t("Endereço não encontrado."))
 
 
 # ----------------------------------------------------------------------------- configurações
@@ -158,7 +159,21 @@ DEFAULT_SETTINGS = {
     "judge_view": {"finance_summary": True, "finance_detail": False, "contacts": False,
                    "modules": {"dashboard": True, "escopo": True, "eap": True, "gantt": True, "planejamento": True,
                                "evidencias": True, "stakeholders": True, "financeiro": True, "riscos": True, "raci": True,
-                               "calendario": True, "relatorios": True}},
+                               "calendario": True, "relatorios": True, "caminho_critico": True}},
+    # Matriz IMPACTO da equipe (arquivo IMPACTO.xlsx): exemplos de consequência para cada combinação de probabilidade
+    # (linhas, de "Raro" a "Muito provável") e impacto (colunas, de "Muito baixo" a "Muito alto"). Editável pelo administrador.
+    "impact_matrix": {
+        "source": "IMPACTO.xlsx",
+        "probability_labels": ["Raro", "Improvável", "Possível", "Provável", "Muito provável"],
+        "impact_labels": ["Muito baixo", "Baixo", "Médio", "Alto", "Muito alto"],
+        "cells": [
+            ["Pequeno imprevisto individual", "Pequeno problema logístico", "Falha pontual em equipamento", "Acidente durante fabricação/testes", "Imprevisto grave que impeça a participação da equipe"],
+            ["Erro de formatação", "Perda de informação não crítica", "Falha pontual em equipamento", "Problema com fornecedor ou material essencial", "Dano grave ao carro antes da competição"],
+            ["Pequenos erros em documentos", "Necessidade de refazer uma tarefa", "Falha em alguma etapa do planejamento", "Problema técnico no carro durante os testes", "Falha que impeça a participação em uma etapa da competição"],
+            ["Falha em organização de arquivos", "Falta de algum material simples", "Falha na comunicação entre áreas", "Problemas na fabricação/montagem do carro", "Impossibilidade de concluir o carro a tempo"],
+            ["Pequenos erros de comunicação", "Atraso em pequenas tarefas", "Atraso em entregas do projeto", "Atraso significativo no desenvolvimento do carro", "Perda de prazo crítico da competição"],
+        ],
+    },
     "evidence_weights": {"entregas": 25, "marcos": 10, "prazos": 20, "metas": 15, "evidencias": 10, "progresso": 10, "qualidade": 10},
     "governance": {"require_approval_to_complete": False, "reapprove_on_change": True},
     "custom_fields": {"activities": []},
@@ -166,7 +181,7 @@ DEFAULT_SETTINGS = {
     "uploads": {"allowed_ext": ["pdf", "png", "jpg", "jpeg", "webp", "gif", "xlsx", "xls", "csv", "docx", "doc",
                                 "pptx", "ppt", "txt", "zip", "mp4", "stl", "step", "dxf"]},
     # preferências individuais (escopo "user")
-    "ui": {"mode": None, "font_scale": 100, "large_font": False, "reduce_motion": False},
+    "ui": {"mode": None, "font_scale": 100, "large_font": False, "reduce_motion": False, "lang": None},
     "notify": {"email": False, "kinds": {}},
 }
 USER_SCOPED = {"ui", "notify"}
@@ -246,12 +261,8 @@ def days_between(a, b):
 
 
 def fmt_date(s):
-    if not s:
-        return "—"
-    try:
-        return d(s[:10]).strftime("%d/%m/%Y")
-    except ValueError:
-        return s
+    from .i18n import fmt_date_l
+    return fmt_date_l(s)
 
 
 def to_cents(v, label="Valor"):
@@ -266,9 +277,9 @@ def to_cents(v, label="Valor"):
         else:
             dec = Decimal(str(v))
     except (InvalidOperation, ValueError):
-        raise bad(f"{label}: informe um valor monetário válido.")
+        raise bad(_t("{0}: informe um valor monetário válido.", label))
     if not dec.is_finite():
-        raise bad(f"{label}: informe um valor monetário válido.")
+        raise bad(_t("{0}: informe um valor monetário válido.", label))
     return int((dec * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
@@ -324,7 +335,7 @@ class F:
             v = v.strip()
         if v is None or v == "" or (self.kind == "json" and v in ([], {}) and not self.required):
             if self.required:
-                raise bad(f"{L}: campo obrigatório.", {name: "Campo obrigatório."})
+                raise bad(_t("{0}: campo obrigatório.", L), {name: _t("Campo obrigatório.")})
             return None if self.kind not in ("bool",) else 0
         k = self.kind
         try:
@@ -334,13 +345,13 @@ class F:
                 v = v.replace("\x00", "")
                 mx = self.max or (200 if k == "text" else 20000 if k == "long" else 200)
                 if len(v) > mx:
-                    raise bad(f"{L}: máximo de {mx} caracteres.", {name: f"Máximo de {mx} caracteres."})
+                    raise bad(_t("{0}: máximo de {1} caracteres.", L, mx), {name: _t("Máximo de {0} caracteres.", mx)})
                 if k == "email" and not _EMAIL_RX.match(v):
-                    raise bad(f"{L}: e-mail inválido.", {name: "E-mail inválido."})
+                    raise bad(_t("{0}: e-mail inválido.", L), {name: _t("E-mail inválido.")})
                 if k == "color" and not _COLOR_RX.match(v):
-                    raise bad(f"{L}: cor inválida (use o formato #RRGGBB).", {name: "Cor inválida."})
+                    raise bad(_t("{0}: cor inválida (use o formato #RRGGBB).", L), {name: _t("Cor inválida.")})
                 if k == "time" and not _TIME_RX.match(v):
-                    raise bad(f"{L}: horário inválido (HH:MM).", {name: "Horário inválido."})
+                    raise bad(_t("{0}: horário inválido (HH:MM).", L), {name: _t("Horário inválido.")})
                 return v.lower() if k == "email" else v
             if k == "date":
                 if not isinstance(v, str) or not _DATE_RX.match(v):
@@ -352,7 +363,7 @@ class F:
                     raise ValueError
                 v = int(v)
                 if (self.min is not None and v < self.min) or (self.max is not None and v > self.max):
-                    raise bad(f"{L}: informe um número entre {self.min} e {self.max}.", {name: "Fora do intervalo permitido."})
+                    raise bad(_t("{0}: informe um número entre {1} e {2}.", L, self.min, self.max), {name: _t("Fora do intervalo permitido.")})
                 return v
             if k == "real":
                 v = float(str(v).replace(",", ".")) if isinstance(v, str) else float(v)
@@ -362,33 +373,33 @@ class F:
             if k == "money":
                 c = to_cents(v, L)
                 if c < (self.min if self.min is not None else 0):
-                    raise bad(f"{L}: o valor não pode ser negativo.", {name: "Valor negativo."})
+                    raise bad(_t("{0}: o valor não pode ser negativo.", L), {name: _t("Valor negativo.")})
                 if c > 10 ** 12:
-                    raise bad(f"{L}: valor acima do limite permitido.", {name: "Valor muito alto."})
+                    raise bad(_t("{0}: valor acima do limite permitido.", L), {name: _t("Valor muito alto.")})
                 return c
             if k == "bool":
                 return 1 if v in (True, 1, "1", "true", "sim") else 0
             if k == "enum":
                 if v not in self.options:
-                    raise bad(f"{L}: opção inválida.", {name: "Opção inválida."})
+                    raise bad(_t("{0}: opção inválida.", L), {name: _t("Opção inválida.")})
                 return v
             if k == "ref":
                 if not isinstance(v, str):
                     raise ValueError
                 extra = " AND deleted_at IS NULL" if self.ref != "movements" else ""
                 if not db.one(f"SELECT 1 FROM {self.ref} WHERE id=?{extra}", (v,)):
-                    raise bad(f"{L}: registro vinculado não encontrado.", {name: "Registro vinculado não encontrado."})
+                    raise bad(_t("{0}: registro vinculado não encontrado.", L), {name: _t("Registro vinculado não encontrado.")})
                 return v
             if k == "json":
                 s = json.dumps(v, ensure_ascii=False)
                 if len(s) > 200000:
-                    raise bad(f"{L}: conteúdo muito extenso.")
+                    raise bad(_t("{0}: conteúdo muito extenso.", L))
                 return s
         except ApiError:
             raise
         except (ValueError, TypeError):
-            raise bad(f"{L}: valor inválido.", {name: "Valor inválido."})
-        raise RuntimeError(f"tipo de campo desconhecido: {k}")
+            raise bad(_t("{0}: valor inválido.", L), {name: _t("Valor inválido.")})
+        raise RuntimeError(_t("tipo de campo desconhecido: {0}", k))
 
     def out(self, v):
         if self.kind == "money":
@@ -412,7 +423,7 @@ class F:
 
 def check_order(data, a, b, la, lb):
     if data.get(a) and data.get(b) and data[a] > data[b]:
-        raise bad(f"{la} não pode ser posterior a {lb}.", {b: f"Deve ser igual ou posterior a {la}."})
+        raise bad(_t("{0} não pode ser posterior a {1}.", la, lb), {b: _t("Deve ser igual ou posterior a {0}.", la)})
 
 
 # ----------------------------------------------------------------------------- CRUD genérico
@@ -517,11 +528,11 @@ class Resource:
                 data[f.col(name)] = f.parse(ctx.db, name, body[name])
             elif existing is None:
                 if f.required and f.default is None:
-                    raise bad(f"{f.label}: campo obrigatório.", {name: "Campo obrigatório."})
+                    raise bad(_t("{0}: campo obrigatório.", f.label), {name: _t("Campo obrigatório.")})
                 if f.default is not None:
                     data[f.col(name)] = f.default
         if existing is None and self.season and not data.get("season_id"):
-            raise bad("Temporada: campo obrigatório.", {"season_id": "Campo obrigatório."})
+            raise bad(_t("Temporada: campo obrigatório."), {"season_id": _t("Campo obrigatório.")})
         return data
 
     def create(self, ctx, body, extra=None, quiet=False):
@@ -551,7 +562,7 @@ class Resource:
             raise forbidden()
         version = body.get("version")
         if not isinstance(version, int):
-            raise bad("Informe a versão do registro (version) para evitar sobrescritas.", code="versao_obrigatoria")
+            raise bad(_t("Informe a versão do registro (version) para evitar sobrescritas."), code="versao_obrigatoria")
         data = self.parse(ctx, body, existing)
         if extra:
             data.update(extra)
@@ -564,8 +575,8 @@ class Resource:
         cur = ctx.db.ex(f"UPDATE {self.table} SET {sets}, version=version+1 WHERE id=? AND version=?",
                         list(data.values()) + [id, version])
         if cur.rowcount == 0:
-            raise conflict("Este registro foi alterado por outra pessoa enquanto você editava. "
-                           "Revise a versão atual antes de salvar novamente.", code="conflito_versao",
+            raise conflict(_t("Este registro foi alterado por outra pessoa enquanto você editava. "
+                           "Revise a versão atual antes de salvar novamente."), code="conflito_versao",
                            current=self.expand(ctx, [self.ser(existing)])[0])
         saved = self.raw(ctx.db, id)
         self.after_save(ctx, saved, existing)
@@ -604,8 +615,7 @@ class Resource:
         refs = self.references(ctx.db, id)
         if refs:
             desc = ", ".join(f"{r['count']} {r['label']}" for r in refs)
-            raise conflict(f"Não é possível excluir: existem registros vinculados ({desc}). "
-                           "Desvincule-os ou arquive este registro para preservar o histórico.",
+            raise conflict(_t("Não é possível excluir: existem registros vinculados ({0}). Desvincule-os ou arquive este registro para preservar o histórico.", desc),
                            code="vinculos_existentes", references=refs, can_archive=self.archive)
         if self.soft:
             ctx.db.ex(f"UPDATE {self.table} SET deleted_at=?, version=version+1 WHERE id=?", (now_iso(), id))
@@ -643,7 +653,7 @@ def judge_view(ctx):
 def judge_module_guard(ctx, module):
     """Juízes só acessam os módulos liberados pelo administrador."""
     if ctx.role == "juiz" and not judge_view(ctx)["modules"].get(module, False):
-        raise forbidden("Este módulo não está disponível para o perfil de juiz.")
+        raise forbidden(_t("Este módulo não está disponível para o perfil de juiz."))
 
 
 def user_names(db):

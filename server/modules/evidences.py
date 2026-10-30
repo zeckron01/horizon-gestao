@@ -4,37 +4,38 @@ Metodologia da pontuação composta (exibida na interface):
 cada critério vale de 0 a 100 e é ponderado pelos pesos configuráveis; critérios sem dados na semana são
 desconsiderados (os pesos restantes são renormalizados). Semanas sem registro não recebem pontuação.
 A quantidade de texto nunca entra no cálculo."""
+from ..i18n import _t
 from ..core import (F, INTERNAL, STAFF, audit, bad, check_order, conflict, forbidden, get_setting, judge_module_guard,
                     not_found, route, user_names)
 from ..db import new_id, now_iso
 
-MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+MONTHS = [_t("Janeiro"), _t("Fevereiro"), _t("Março"), _t("Abril"), _t("Maio"), _t("Junho"), _t("Julho"), _t("Agosto"), _t("Setembro"), _t("Outubro"), _t("Novembro"), _t("Dezembro")]
 TEXT_FIELDS = {
-    "activities_done": "Atividades realizadas", "deliverables": "Entregas produzidas", "results": "Resultados alcançados",
-    "difficulties": "Dificuldades encontradas", "decisions": "Decisões tomadas", "next_actions": "Próximas ações",
-    "pending": "Pendências", "extras": "Evidências complementares", "manager_comment": "Comentários do gestor",
+    "activities_done": _t("Atividades realizadas"), "deliverables": _t("Entregas produzidas"), "results": _t("Resultados alcançados"),
+    "difficulties": _t("Dificuldades encontradas"), "decisions": _t("Decisões tomadas"), "next_actions": _t("Próximas ações"),
+    "pending": _t("Pendências"), "extras": _t("Evidências complementares"), "manager_comment": _t("Comentários do gestor"),
 }
 CRITERIA = {
-    "entregas": "Entregas concluídas na semana ÷ entregas com prazo na semana (limitado a 100%)",
-    "marcos": "Marcos alcançados na semana ÷ marcos com prazo na semana (limitado a 100%)",
-    "prazos": "Entregas concluídas dentro do prazo ÷ entregas concluídas na semana",
-    "metas": "Metas atingidas ÷ metas definidas para a semana (informadas no registro)",
-    "evidencias": "100 quando há ao menos um anexo válido no registro da área; 0 caso contrário",
-    "progresso": "Progresso médio atual das atividades da área planejadas para o período da semana",
-    "qualidade": "Avaliação qualitativa do gestor (1 a 5) convertida para 0–100",
+    "entregas": _t("Entregas concluídas na semana ÷ entregas com prazo na semana (limitado a 100%)"),
+    "marcos": _t("Marcos alcançados na semana ÷ marcos com prazo na semana (limitado a 100%)"),
+    "prazos": _t("Entregas concluídas dentro do prazo ÷ entregas concluídas na semana"),
+    "metas": _t("Metas atingidas ÷ metas definidas para a semana (informadas no registro)"),
+    "evidencias": _t("100 quando há ao menos um anexo válido no registro da área; 0 caso contrário"),
+    "progresso": _t("Progresso médio atual das atividades da área planejadas para o período da semana"),
+    "qualidade": _t("Avaliação qualitativa do gestor (1 a 5) convertida para 0–100"),
 }
 WEEK_FIELDS = {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "month": F("text", "Mês de referência", required=True, max=7),
-    "week_number": F("int", "Número da semana", required=True, min=1, max=6),
-    "start_date": F("date", "Data de início"),
-    "end_date": F("date", "Data de término"),
-    "supervisor_id": F("ref", "Gestor/professor responsável pelo acompanhamento", ref="users"),
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "month": F("text", _t("Mês de referência"), required=True, max=7),
+    "week_number": F("int", _t("Número da semana"), required=True, min=1, max=6),
+    "start_date": F("date", _t("Data de início")),
+    "end_date": F("date", _t("Data de término")),
+    "supervisor_id": F("ref", _t("Gestor/professor responsável pelo acompanhamento"), ref="users"),
 }
 
 
 def month_label(m):
-    return f"{MONTHS[int(m[5:7]) - 1]} de {m[:4]}"
+    return _t("{0} de {1}", MONTHS[int(m[5:7]) - 1], m[:4])
 
 
 def _area_metrics(db, week, area_id):
@@ -161,7 +162,7 @@ def get_week(ctx):
     judge_module_guard(ctx, "evidencias")
     w = ctx.db.one("SELECT * FROM evidence_weeks WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not w:
-        raise not_found("Semana")
+        raise not_found(_t("Semana"))
     return load_week(ctx, w)
 
 
@@ -171,16 +172,16 @@ def _parse_week(ctx, existing=None):
         if k in ctx.body:
             data[k] = f.parse(ctx.db, k, ctx.body[k])
         elif existing is None and f.required:
-            raise bad(f"{f.label}: campo obrigatório.", {k: "Campo obrigatório."})
+            raise bad(_t("{0}: campo obrigatório.", f.label), {k: _t("Campo obrigatório.")})
     merged = {**(existing or {}), **data}
     m = merged.get("month") or ""
     if len(m) != 7 or m[4] != "-" or not m[:4].isdigit() or not m[5:].isdigit() or not 1 <= int(m[5:]) <= 12:
-        raise bad("Mês de referência inválido (use AAAA-MM).", {"month": "Formato inválido."})
-    check_order(merged, "start_date", "end_date", "Data de início", "Data de término")
+        raise bad(_t("Mês de referência inválido (use AAAA-MM)."), {"month": _t("Formato inválido.")})
+    check_order(merged, "start_date", "end_date", _t("Data de início"), _t("Data de término"))
     dup = ctx.db.one("SELECT id FROM evidence_weeks WHERE season_id=? AND month=? AND week_number=? AND deleted_at IS NULL AND id<>?",
                      (merged["season_id"], merged["month"], merged["week_number"], (existing or {}).get("id", "")))
     if dup:
-        raise conflict("Já existe um registro para esta semana neste mês.", code="semana_duplicada", existing_id=dup["id"])
+        raise conflict(_t("Já existe um registro para esta semana neste mês."), code="semana_duplicada", existing_id=dup["id"])
     return data
 
 
@@ -195,7 +196,7 @@ def create_week(ctx):
         row["supervisor_id"] = ctx.uid
     ctx.db.insert("evidence_weeks", row)
     w = ctx.db.one("SELECT * FROM evidence_weeks WHERE id=?", (row["id"],))
-    audit(ctx, "criar", "evidence_weeks", w["id"], f"{month_label(w['month'])} — semana {w['week_number']}", after=w)
+    audit(ctx, "criar", "evidence_weeks", w["id"], _t("{0} — semana {1}", month_label(w['month']), w['week_number']), after=w)
     return load_week(ctx, w)
 
 
@@ -203,19 +204,19 @@ def create_week(ctx):
 def update_week(ctx):
     w = ctx.db.one("SELECT * FROM evidence_weeks WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not w:
-        raise not_found("Semana")
+        raise not_found(_t("Semana"))
     data = _parse_week(ctx, w)
     data.pop("season_id", None)
     if not isinstance(ctx.body.get("version"), int):
-        raise bad("Informe a versão do registro (version).", code="versao_obrigatoria")
+        raise bad(_t("Informe a versão do registro (version)."), code="versao_obrigatoria")
     if ctx.body.get("resolve_review"):
         data["needs_review"], data["review_note"] = 0, None
     sets = ", ".join(f"{k}=?" for k in data) + (", " if data else "")
     cur = ctx.db.ex(f"UPDATE evidence_weeks SET {sets}updated_at=?, version=version+1 WHERE id=? AND version=?", list(data.values()) + [now_iso(), w["id"], ctx.body["version"]])
     if cur.rowcount == 0:
-        raise conflict("Esta semana foi alterada por outra pessoa. Recarregue antes de salvar.", code="conflito_versao")
+        raise conflict(_t("Esta semana foi alterada por outra pessoa. Recarregue antes de salvar."), code="conflito_versao")
     new = ctx.db.one("SELECT * FROM evidence_weeks WHERE id=?", (w["id"],))
-    audit(ctx, "alterar", "evidence_weeks", w["id"], f"{month_label(w['month'])} — semana {w['week_number']}", before=w, after=new)
+    audit(ctx, "alterar", "evidence_weeks", w["id"], _t("{0} — semana {1}", month_label(w['month']), w['week_number']), before=w, after=new)
     return load_week(ctx, new)
 
 
@@ -223,13 +224,13 @@ def update_week(ctx):
 def delete_week(ctx):
     w = ctx.db.one("SELECT * FROM evidence_weeks WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not w:
-        raise not_found("Semana")
+        raise not_found(_t("Semana"))
     n = ctx.db.val("SELECT COUNT(*) FROM evidence_entries WHERE week_id=?", (w["id"],))
     if n and ctx.query.get("cascade") != "1":
-        raise conflict(f"Esta semana possui {n} registro(s) de área. Confirme para excluir a semana com todos os registros.",
-                       code="vinculos_existentes", references=[{"label": "registro(s) de área", "count": n}], can_cascade=True, can_archive=False)
+        raise conflict(_t("Esta semana possui {0} registro(s) de área. Confirme para excluir a semana com todos os registros.", n),
+                       code="vinculos_existentes", references=[{"label": _t("registro(s) de área"), "count": n}], can_cascade=True, can_archive=False)
     ctx.db.ex("UPDATE evidence_weeks SET deleted_at=?, version=version+1 WHERE id=?", (now_iso(), w["id"]))
-    audit(ctx, "excluir", "evidence_weeks", w["id"], f"{month_label(w['month'])} — semana {w['week_number']} ({n} registro(s))", before=w)
+    audit(ctx, "excluir", "evidence_weeks", w["id"], _t("{0} — semana {1} ({2} registro(s))", month_label(w['month']), w['week_number'], n), before=w)
     return {"ok": True}
 
 
@@ -240,32 +241,32 @@ def save_entry(ctx):
     w = db.one("SELECT * FROM evidence_weeks WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     area = db.one("SELECT * FROM areas WHERE id=? AND deleted_at IS NULL", (ctx.params["area_id"],))
     if not w or not area:
-        raise not_found("Semana ou área")
+        raise not_found(_t("Semana ou área"))
     e = db.one("SELECT * FROM evidence_entries WHERE week_id=? AND area_id=?", (w["id"], area["id"]))
     b = ctx.body
     if ctx.role not in STAFF:
         member_of = ctx.user["area_id"] == area["id"] or (e and db.one("SELECT 1 FROM evidence_members WHERE entry_id=? AND user_id=?", (e["id"], ctx.uid)))
         if not member_of:
-            raise forbidden("Integrantes só registram evidências da própria área.")
+            raise forbidden(_t("Integrantes só registram evidências da própria área."))
         if any(k in b and b[k] != (e or {}).get(k) for k in ("manager_comment", "m_quality")):
-            raise forbidden("Comentários e avaliação do gestor são exclusivos da gestão.")
+            raise forbidden(_t("Comentários e avaliação do gestor são exclusivos da gestão."))
     data = {}
     for k, label in TEXT_FIELDS.items():
         if k in b:
             data[k] = F("long", label, max=20000).parse(db, k, b[k])
     if "record_date" in b:
-        data["record_date"] = F("date", "Data do registro").parse(db, "record_date", b["record_date"])
-    for k, lab, lo, hi in (("m_goals_met", "Metas atingidas", 0, 999), ("m_goals_total", "Metas definidas", 0, 999), ("m_quality", "Avaliação qualitativa", 1, 5)):
+        data["record_date"] = F("date", _t("Data do registro")).parse(db, "record_date", b["record_date"])
+    for k, lab, lo, hi in (("m_goals_met", _t("Metas atingidas"), 0, 999), ("m_goals_total", _t("Metas definidas"), 0, 999), ("m_quality", _t("Avaliação qualitativa"), 1, 5)):
         if k in b:
             data[k] = F("int", lab, min=lo, max=hi).parse(db, k, b[k])
     if "status" in b:
-        data["status"] = F("enum", "Situação", options=("rascunho", "registrado")).parse(db, "status", b["status"])
+        data["status"] = F("enum", _t("Situação"), options=("rascunho", "registrado")).parse(db, "status", b["status"])
     merged = {**(e or {}), **data}
     if merged.get("m_goals_total") is not None and (merged.get("m_goals_met") or 0) > merged["m_goals_total"]:
-        raise bad("Metas atingidas não pode ser maior que metas definidas.", {"m_goals_met": "Maior que o total."})
+        raise bad(_t("Metas atingidas não pode ser maior que metas definidas."), {"m_goals_met": _t("Maior que o total.")})
     if merged.get("status") == "registrado" and not any((merged.get(k) or "").strip() for k in ("activities_done", "deliverables", "results")):
-        raise bad("Para registrar a evidência, descreva ao menos as atividades realizadas, as entregas ou os resultados. Você pode salvar como rascunho.",
-                  {"activities_done": "Descreva as atividades realizadas."})
+        raise bad(_t("Para registrar a evidência, descreva ao menos as atividades realizadas, as entregas ou os resultados. Você pode salvar como rascunho."),
+                  {"activities_done": _t("Descreva as atividades realizadas.")})
     ts = now_iso()
     if e is None:
         from ..core import today_local
@@ -276,11 +277,11 @@ def save_entry(ctx):
         before = None
     else:
         if not isinstance(b.get("version"), int):
-            raise bad("Informe a versão do registro (version).", code="versao_obrigatoria")
+            raise bad(_t("Informe a versão do registro (version)."), code="versao_obrigatoria")
         sets = ", ".join(f"{k}=?" for k in data) + (", " if data else "")
         cur = db.ex(f"UPDATE evidence_entries SET {sets}updated_at=?, version=version+1 WHERE id=? AND version=?", list(data.values()) + [ts, e["id"], b["version"]])
         if cur.rowcount == 0:
-            raise conflict("Este registro foi alterado por outra pessoa enquanto você editava. Recarregue para ver a versão atual; seu texto não foi salvo.",
+            raise conflict(_t("Este registro foi alterado por outra pessoa enquanto você editava. Recarregue para ver a versão atual; seu texto não foi salvo."),
                            code="conflito_versao", current=e)
         eid, before = e["id"], e
     for key, table, col, ref in (("member_ids", "evidence_members", "user_id", "users"), ("activity_ids", "evidence_activities", "activity_id", "activities")):
@@ -291,7 +292,7 @@ def save_entry(ctx):
                     db.ex(f"INSERT INTO {table} (entry_id, {col}) VALUES (?,?)", (eid, i))
     new = db.one("SELECT * FROM evidence_entries WHERE id=?", (eid,))
     audit(ctx, "criar" if before is None else "alterar", "evidence_entries", eid,
-          f"{month_label(w['month'])} — semana {w['week_number']} — {area['name']}", before=before, after=new)
+          _t("{0} — semana {1} — {2}", month_label(w['month']), w['week_number'], area['name']), before=before, after=new)
     return load_week(ctx, w)
 
 
@@ -299,10 +300,10 @@ def save_entry(ctx):
 def delete_entry(ctx):
     e = ctx.db.one("SELECT * FROM evidence_entries WHERE id=?", (ctx.params["id"],))
     if not e:
-        raise not_found("Registro")
+        raise not_found(_t("Registro"))
     ctx.db.ex("DELETE FROM evidence_entries WHERE id=?", (e["id"],))
     ctx.db.ex("UPDATE files SET deleted_at=? WHERE entity_type='evidence_entries' AND entity_id=?", (now_iso(), e["id"]))
-    audit(ctx, "excluir", "evidence_entries", e["id"], "Registro de evidência removido", before=e)
+    audit(ctx, "excluir", "evidence_entries", e["id"], _t("Registro de evidência removido"), before=e)
     return {"ok": True}
 
 

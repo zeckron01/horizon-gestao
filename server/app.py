@@ -19,6 +19,7 @@ from . import APP_VERSION
 from .config import cfg
 from .core import ApiError, Ctx, Raw, ROLE_LABELS, RESOURCES, get_setting, match_route, route
 from .db import NotConfigured, acquire, get_db, migrate, now_iso, release
+from .i18n import _t, Msg, localize, norm_lang, set_lang, tx
 
 log = logging.getLogger("horizon")
 STATIC = Path(__file__).parent / "static"
@@ -51,8 +52,9 @@ def _json(payload, status=200):
     return JSONResponse(payload, status_code=status, headers={"Cache-Control": "no-store"})
 
 
-def _error(e: ApiError):
-    return _json({"error": {"code": e.code, "message": e.message, **e.extra}}, e.status)
+def _error(e: ApiError, lang=None):
+    msg = e.message.render(lang) if isinstance(e.message, Msg) else tx(e.message, lang)
+    return _json({"error": {"code": e.code, "message": msg, **localize(e.extra, lang)}}, e.status)
 
 
 def _run(r, params, request_info, body, files):
@@ -65,25 +67,29 @@ def _run(r, params, request_info, body, files):
     ctx.session = None
     q0 = getattr(db, "queries", 0)
     db.scache = {}
+    set_lang(request_info.get("lang") or "pt-BR")
     try:
         if r["tx"]:
             db.begin()
         if not r["public"]:
             user, session = load_session(db, request_info["cookie"])
             if not user:
-                raise ApiError(401, "nao_autenticado", "Sessão expirada ou inválida. Entre novamente.")
+                raise ApiError(401, "nao_autenticado", _t("Sessão expirada ou inválida. Entre novamente."))
             ctx.user, ctx.session = user, session
+            if not request_info.get("lang"):   # sem cabeçalho X-Lang: vale a preferência gravada do usuário
+                request_info["lang"] = norm_lang((get_setting(db, "ui", user["id"]) or {}).get("lang")) or "pt-BR"
+                set_lang(request_info["lang"])
             if request_info["method"] != "GET":
                 # CSRF: token por sessão, enviado em cabeçalho (não é acessível a outros sites).
                 if not hmac.compare_digest(request_info["csrf"] or "", session["csrf"]):
-                    raise ApiError(403, "csrf", "Requisição recusada (token de segurança ausente ou inválido). Recarregue a página.")
+                    raise ApiError(403, "csrf", _t("Requisição recusada (token de segurança ausente ou inválido). Recarregue a página."))
                 if user["role"] == "juiz" and not r["judge_ok"]:
                     from .core import audit
-                    audit(ctx, "tentativa_bloqueada", "permissao", None, f"Juiz tentou {request_info['method']} {request_info['path']}")
+                    audit(ctx, "tentativa_bloqueada", "permissao", None, _t("Juiz tentou {0} {1}", request_info['method'], request_info['path']))
                     db.commit()
-                    raise ApiError(403, "somente_leitura", "O perfil de juiz possui acesso somente de leitura.")
+                    raise ApiError(403, "somente_leitura", _t("O perfil de juiz possui acesso somente de leitura."))
             if user["role"] not in r["allow"]:
-                raise ApiError(403, "sem_permissao", "Você não tem permissão para realizar esta operação.")
+                raise ApiError(403, "sem_permissao", _t("Você não tem permissão para realizar esta operação."))
         idem = request_info["idem"]
         if idem and r["tx"] and ctx.user and request_info["method"] == "POST":
             prev = db.one("SELECT * FROM idempotency WHERE key=? AND user_id=?", (idem, ctx.uid))
@@ -99,6 +105,8 @@ def _run(r, params, request_info, body, files):
                   (idem, ctx.uid, request_info["path"], 200, json.dumps(result, ensure_ascii=False, default=str), now_iso()))
         db.commit()
         request_info["db_queries"] = getattr(db, "queries", 0) - q0
+        if not isinstance(result, Raw):
+            result = localize(result, request_info.get("lang") or "pt-BR")   # textos do sistema no idioma da interface
         return result, 200, cookie
     except BaseException:
         db.rollback()
@@ -111,6 +119,7 @@ def _run(r, params, request_info, body, files):
 async def api(request):
     from .auth import COOKIE
     method, path = request.method, request.url.path
+    info = {"lang": norm_lang(request.headers.get("x-lang") or request.query_params.get("lang"))}
     try:
         r, params = match_route(method, path)
         body, files = {}, []
@@ -119,7 +128,7 @@ async def api(request):
         if method in ("POST", "PUT", "PATCH", "DELETE"):
             if ctype.startswith("multipart/form-data"):
                 if clen > (cfg.MAX_UPLOAD_MB * 4 + 1) * 1024 * 1024:
-                    raise ApiError(413, "arquivo_grande", f"Envio acima do limite permitido ({cfg.MAX_UPLOAD_MB} MB por arquivo).")
+                    raise ApiError(413, "arquivo_grande", _t("Envio acima do limite permitido ({0} MB por arquivo).", cfg.MAX_UPLOAD_MB))
                 form = await request.form()
                 for key, val in form.multi_items():
                     if hasattr(val, "filename"):
@@ -129,20 +138,20 @@ async def api(request):
                         body[key] = val
             else:
                 if clen > 3 * 1024 * 1024:
-                    raise ApiError(413, "corpo_grande", "Conteúdo enviado acima do limite permitido.")
+                    raise ApiError(413, "corpo_grande", _t("Conteúdo enviado acima do limite permitido."))
                 raw = await request.body()
                 if len(raw) > 3 * 1024 * 1024:
-                    raise ApiError(413, "corpo_grande", "Conteúdo enviado acima do limite permitido.")
+                    raise ApiError(413, "corpo_grande", _t("Conteúdo enviado acima do limite permitido."))
                 if raw:
                     try:
                         body = json.loads(raw)
                     except ValueError:
-                        raise ApiError(400, "json_invalido", "O conteúdo enviado não é um JSON válido.")
+                        raise ApiError(400, "json_invalido", _t("O conteúdo enviado não é um JSON válido."))
                     if not isinstance(body, dict):
-                        raise ApiError(400, "json_invalido", "O conteúdo enviado deve ser um objeto JSON.")
-        info = {"method": method, "path": path, "query": dict(request.query_params), "ip": _client_ip(request),
+                        raise ApiError(400, "json_invalido", _t("O conteúdo enviado deve ser um objeto JSON."))
+        info.update({"method": method, "path": path, "query": dict(request.query_params), "ip": _client_ip(request),
                 "ua": request.headers.get("user-agent"), "authorization": request.headers.get("authorization"), "cookie": request.cookies.get(COOKIE),
-                "csrf": request.headers.get("x-csrf-token"), "idem": (request.headers.get("idempotency-key") or "")[:100] or None}
+                "csrf": request.headers.get("x-csrf-token"), "idem": (request.headers.get("idempotency-key") or "")[:100] or None})
         if not _started:
             await run_in_threadpool(startup)
         result, status, cookie = await run_in_threadpool(_run, r, params, info, body, files)
@@ -164,22 +173,22 @@ async def api(request):
                 resp.set_cookie(COOKIE, cookie.token, max_age=cfg.SESSION_HOURS * 3600, httponly=True, samesite="lax", secure=secure, path="/")
         return resp
     except ApiError as e:
-        return _error(e)
+        return _error(e, info.get("lang"))
     except Exception as e:  # erro inesperado: registra e devolve mensagem genérica (sem detalhes internos)
         import sqlite3
         from . import db as dbm, pg
         if isinstance(e, NotConfigured):
-            return _error(ApiError(503, "banco_nao_configurado", str(e)))
+            return _error(ApiError(503, "banco_nao_configurado", str(e)), info.get("lang"))
         if isinstance(e, pg.OperationalError):
             log.error("Banco de dados indisponível em %s %s: %s", method, path, e)
-            return _error(ApiError(503, "banco_indisponivel", "Não foi possível falar com o banco de dados. Nada foi salvo; tente novamente em instantes."))
+            return _error(ApiError(503, "banco_indisponivel", _t("Não foi possível falar com o banco de dados. Nada foi salvo; tente novamente em instantes.")), info.get("lang"))
         if isinstance(e, dbm.IntegrityError):
             log.warning("Violação de integridade em %s %s: %s", method, path, e)
-            return _error(ApiError(409, "integridade", "Operação recusada: os dados violam uma regra de integridade do banco (registro duplicado ou vínculo inválido)."))
+            return _error(ApiError(409, "integridade", _t("Operação recusada: os dados violam uma regra de integridade do banco (registro duplicado ou vínculo inválido).")), info.get("lang"))
         if isinstance(e, sqlite3.OperationalError) and "locked" in str(e):
-            return _error(ApiError(503, "ocupado", "O servidor está ocupado. Nada foi salvo; tente novamente em instantes."))
+            return _error(ApiError(503, "ocupado", _t("O servidor está ocupado. Nada foi salvo; tente novamente em instantes.")), info.get("lang"))
         log.error("Erro inesperado em %s %s%s\n%s", method, path, f" [SQL: {e.sql}]" if getattr(e, "sql", None) else "", traceback.format_exc())
-        return _error(ApiError(500, "erro_interno", "Erro interno. A operação não foi concluída e nada foi salvo."))
+        return _error(ApiError(500, "erro_interno", _t("Erro interno. A operação não foi concluída e nada foi salvo.")), info.get("lang"))
 
 
 @route("GET", "/api/me")
@@ -187,7 +196,7 @@ def me(ctx):
     from .auth import public_user
     db, u = ctx.db, ctx.user
     keys = ["team_name", "team_subtitle", "timezone", "date_format", "currency", "default_season_id", "theme", "alerts",
-            "risk_scale", "catalogs", "evidence_weights", "custom_fields", "governance", "report_templates", "uploads"]
+            "risk_scale", "impact_matrix", "catalogs", "evidence_weights", "custom_fields", "governance", "report_templates", "uploads"]
     settings = {k: get_setting(db, k) for k in keys}
     settings["judge_view"] = get_setting(db, "judge_view")
     return {
@@ -215,7 +224,7 @@ async def health(request):
         n, dialect = await run_in_threadpool(chk)
     except Exception as e:
         log.error("Falha na verificação de saúde: %s", e)
-        msg = str(e) if isinstance(e, NotConfigured) else "Banco de dados indisponível."
+        msg = str(e) if isinstance(e, NotConfigured) else _t("Banco de dados indisponível.")
         return JSONResponse({"ok": False, "version": APP_VERSION, "error": msg}, status_code=503)
     return JSONResponse({"ok": True, "version": APP_VERSION, "migrations": n, "database": "postgresql" if dialect == "pg" else "sqlite"})
 
@@ -223,7 +232,7 @@ async def health(request):
 async def spa(request):
     index = STATIC / "index.html"
     if not index.exists():
-        return Response("Interface não compilada. Execute: npm install && npm run build (pasta web/).", status_code=503)
+        return Response(_t("Interface não compilada. Execute: npm install && npm run build (pasta web/)."), status_code=503)
     return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
@@ -309,7 +318,7 @@ def _bootstrap():
 # registra as rotas dos módulos
 from . import auth, jobs  # noqa: E402,F401
 from .modules import (activities, admin, comments_files, dashboard, events, evidences, finance, importer,  # noqa: E402,F401
-                      notifications, reports, risks, scope, search, stakeholders, wbs)
+                      notifications, reports, risks, scope, search, stakeholders, wbs, critical)
 
 app = Starlette(
     routes=[

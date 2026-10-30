@@ -1,26 +1,27 @@
 """Stakeholders e patrocínios. O valor recebido é sempre derivado dos movimentos de caixa; o apoio não financeiro,
 dos itens recebidos por patrocínio/doação vinculados. O valor confirmado gera uma receita "a receber" (nunca caixa)."""
+from ..i18n import _t
 from ..core import (F, INTERNAL, Resource, audit, bad, check_order, conflict, from_cents, judge_module_guard, judge_view, not_found, route, to_cents)
 from ..db import new_id, now_iso
 from .finance import INC, month_range
 
 ST_STATUS = ("prospectado", "primeiro_contato", "em_negociacao", "proposta_enviada", "aguardando_resposta",
              "confirmado", "parcialmente_confirmado", "recusado", "concluido")
-ST_LABEL = {"prospectado": "Prospectado", "primeiro_contato": "Primeiro contato realizado", "em_negociacao": "Em negociação",
-            "proposta_enviada": "Proposta enviada", "aguardando_resposta": "Aguardando resposta", "confirmado": "Confirmado",
-            "parcialmente_confirmado": "Parcialmente confirmado", "recusado": "Recusado", "concluido": "Concluído"}
+ST_LABEL = {"prospectado": _t("Prospectado"), "primeiro_contato": _t("Primeiro contato realizado"), "em_negociacao": _t("Em negociação"),
+            "proposta_enviada": _t("Proposta enviada"), "aguardando_resposta": _t("Aguardando resposta"), "confirmado": _t("Confirmado"),
+            "parcialmente_confirmado": _t("Parcialmente confirmado"), "recusado": _t("Recusado"), "concluido": _t("Concluído")}
 WON = ("confirmado", "parcialmente_confirmado", "concluido")
 PROPOSED = ("proposta_enviada", "aguardando_resposta", "confirmado", "parcialmente_confirmado", "recusado", "concluido")
 
 
 class Stakeholders(Resource):
     def validate(self, ctx, s, old):
-        check_order(s, "first_contact_date", "confirmation_date", "Data do primeiro contato", "Data da confirmação")
+        check_order(s, "first_contact_date", "confirmation_date", _t("Data do primeiro contato"), _t("Data da confirmação"))
         if s["status"] == "parcialmente_confirmado" and s.get("requested_cents") and s.get("confirmed_cents") is not None \
                 and s["confirmed_cents"] >= s["requested_cents"]:
-            raise bad("Em uma confirmação parcial, o valor confirmado deve ser menor que o valor solicitado.", {"confirmed": "Deve ser menor que o solicitado."})
+            raise bad(_t("Em uma confirmação parcial, o valor confirmado deve ser menor que o valor solicitado."), {"confirmed": _t("Deve ser menor que o solicitado.")})
         if s["status"] not in WON and s.get("confirmed_cents"):
-            raise bad("Informe valor confirmado apenas quando a negociação estiver confirmada (total ou parcialmente).", {"confirmed": "Negociação ainda não confirmada."})
+            raise bad(_t("Informe valor confirmado apenas quando a negociação estiver confirmada (total ou parcialmente)."), {"confirmed": _t("Negociação ainda não confirmada.")})
 
     def after_save(self, ctx, s, old):
         sync_income(ctx, s)
@@ -28,7 +29,7 @@ class Stakeholders(Resource):
     def before_delete(self, ctx, s):
         n = ctx.db.val("SELECT COUNT(*) FROM movements m JOIN incomes i ON m.origin_type='income' AND m.origin_id=i.id WHERE i.stakeholder_id=?", (s["id"],))
         if n:
-            raise conflict("Este stakeholder possui recebimentos registrados. Arquive-o para preservar o histórico financeiro.", code="vinculos_existentes", can_archive=True)
+            raise conflict(_t("Este stakeholder possui recebimentos registrados. Arquive-o para preservar o histórico financeiro."), code="vinculos_existentes", can_archive=True)
         # receita automática sem movimentos é removida junto
         ctx.db.ex("UPDATE incomes SET deleted_at=? WHERE stakeholder_id=? AND import_source LIKE 'stakeholder:auto%' AND deleted_at IS NULL", (now_iso(), s["id"]))
 
@@ -36,31 +37,31 @@ class Stakeholders(Resource):
         return expand_stakeholders(ctx, rows)
 
 
-ST = Stakeholders("stakeholders", "stakeholders", "Stakeholder", {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "name": F("text", "Nome ou razão social", required=True, max=200),
-    "type": F("text", "Tipo de stakeholder", max=80, filter=True),
-    "contact_name": F("text", "Pessoa de contato", max=160),
+ST = Stakeholders("stakeholders", "stakeholders", _t("Stakeholder"), {
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "name": F("text", _t("Nome ou razão social"), required=True, max=200),
+    "type": F("text", _t("Tipo de stakeholder"), max=80, filter=True),
+    "contact_name": F("text", _t("Pessoa de contato"), max=160),
     "email": F("email", "E-mail"),
-    "phone": F("text", "Telefone", max=40),
-    "purpose": F("long", "Objetivo do relacionamento", max=4000),
-    "need": F("long", "Necessidade atendida", max=4000),
-    "area_id": F("ref", "Área beneficiada", ref="areas", filter=True),
-    "contribution_type": F("text", "Tipo de contribuição", max=60, filter=True),
-    "requested": F("money", "Valor solicitado"),
-    "confirmed": F("money", "Valor confirmado"),
-    "level": F("text", "Nível de patrocínio", max=60, filter=True),
-    "first_contact_date": F("date", "Data do primeiro contato"),
-    "proposal_date": F("date", "Data da proposta"),
-    "confirmation_date": F("date", "Data da confirmação"),
-    "expected_receipt_date": F("date", "Data prevista para recebimento"),
-    "status": F("enum", "Situação da negociação", options=ST_STATUS, default="prospectado", filter=True),
-    "owner_id": F("ref", "Responsável pelo relacionamento", ref="users", filter=True),
-    "next_action": F("long", "Próxima ação", max=2000),
-    "notes": F("long", "Observações"),
+    "phone": F("text", _t("Telefone"), max=40),
+    "purpose": F("long", _t("Objetivo do relacionamento"), max=4000),
+    "need": F("long", _t("Necessidade atendida"), max=4000),
+    "area_id": F("ref", _t("Área beneficiada"), ref="areas", filter=True),
+    "contribution_type": F("text", _t("Tipo de contribuição"), max=60, filter=True),
+    "requested": F("money", _t("Valor solicitado")),
+    "confirmed": F("money", _t("Valor confirmado")),
+    "level": F("text", _t("Nível de patrocínio"), max=60, filter=True),
+    "first_contact_date": F("date", _t("Data do primeiro contato")),
+    "proposal_date": F("date", _t("Data da proposta")),
+    "confirmation_date": F("date", _t("Data da confirmação")),
+    "expected_receipt_date": F("date", _t("Data prevista para recebimento")),
+    "status": F("enum", _t("Situação da negociação"), options=ST_STATUS, default="prospectado", filter=True),
+    "owner_id": F("ref", _t("Responsável pelo relacionamento"), ref="users", filter=True),
+    "next_action": F("long", _t("Próxima ação"), max=2000),
+    "notes": F("long", _t("Observações")),
 }, season=True, order="name COLLATE NOCASE", search=("name", "contact_name", "purpose", "need"),
-    refs=(("expenses", "stakeholder_id", "despesa(s)/item(ns) vinculados", "deleted_at IS NULL"),
-          ("incomes", "stakeholder_id", "receita(s) vinculada(s)", "deleted_at IS NULL AND (import_source IS NULL OR import_source NOT LIKE 'stakeholder:auto%')")))
+    refs=(("expenses", "stakeholder_id", _t("despesa(s)/item(ns) vinculados"), "deleted_at IS NULL"),
+          ("incomes", "stakeholder_id", _t("receita(s) vinculada(s)"), "deleted_at IS NULL AND (import_source IS NULL OR import_source NOT LIKE 'stakeholder:auto%')")))
 
 
 def sync_income(ctx, s):
@@ -77,12 +78,12 @@ def sync_income(ctx, s):
                               "created_at": ts, "updated_at": ts, "created_by": ctx.uid})
     elif auto and want:
         if want < received:
-            raise bad("O valor confirmado não pode ser menor que o valor já recebido deste patrocinador.", {"confirmed": "Menor que o valor recebido."})
+            raise bad(_t("O valor confirmado não pode ser menor que o valor já recebido deste patrocinador."), {"confirmed": _t("Menor que o valor recebido.")})
         db.ex("UPDATE incomes SET expected_cents=?, expected_date=?, area_id=?, status='confirmada', description=?, updated_at=?, version=version+1 WHERE id=?",
               (want, s["expected_receipt_date"], s["area_id"], f"Patrocínio — {s['name']}"[:200], ts, auto["id"]))
     elif auto and not want:
         if received:
-            raise bad("Este patrocinador já possui recebimentos registrados. Estorne os recebimentos antes de remover o valor confirmado.")
+            raise bad(_t("Este patrocinador já possui recebimentos registrados. Estorne os recebimentos antes de remover o valor confirmado."))
         db.ex("UPDATE incomes SET status='cancelada', updated_at=?, version=version+1 WHERE id=?", (ts, auto["id"]))
 
 
@@ -128,26 +129,26 @@ def list_stakeholders(ctx):
 ST.register(methods=("get", "create", "update", "delete", "archive"))
 
 CP_FIELDS = {
-    "kind": F("text", "Tipo de contrapartida", max=80),
-    "description": F("long", "Descrição", required=True, max=2000),
-    "due_date": F("date", "Prazo"),
-    "status": F("enum", "Situação", options=("pendente", "cumprida", "cancelada"), default="pendente"),
-    "done_date": F("date", "Data do cumprimento"),
-    "record_note": F("long", "Registro do cumprimento (o que foi feito, onde, link/evidência)", max=4000),
+    "kind": F("text", _t("Tipo de contrapartida"), max=80),
+    "description": F("long", _t("Descrição"), required=True, max=2000),
+    "due_date": F("date", _t("Prazo")),
+    "status": F("enum", _t("Situação"), options=("pendente", "cumprida", "cancelada"), default="pendente"),
+    "done_date": F("date", _t("Data do cumprimento")),
+    "record_note": F("long", _t("Registro do cumprimento (o que foi feito, onde, link/evidência)"), max=4000),
 }
 
 
 def _cp_check(data):
     if data.get("status") == "cumprida" and not (data.get("done_date") and (data.get("record_note") or "").strip()):
-        raise bad("Uma contrapartida só pode ser marcada como cumprida com o registro correspondente (data e descrição do que foi realizado).",
-                  {"record_note": "Registro obrigatório.", "done_date": "Data obrigatória."}, code="registro_obrigatorio")
+        raise bad(_t("Uma contrapartida só pode ser marcada como cumprida com o registro correspondente (data e descrição do que foi realizado)."),
+                  {"record_note": _t("Registro obrigatório."), "done_date": _t("Data obrigatória.")}, code="registro_obrigatorio")
 
 
 @route("POST", "/api/stakeholders/{id}/contrapartidas")
 def add_counterpart(ctx):
     s = ST.raw(ctx.db, ctx.params["id"])
     if not s:
-        raise not_found("Stakeholder")
+        raise not_found(_t("Stakeholder"))
     data = {k: f.parse(ctx.db, k, ctx.body.get(k, f.default)) for k, f in CP_FIELDS.items()}
     _cp_check(data)
     ts = now_iso()
@@ -161,7 +162,7 @@ def add_counterpart(ctx):
 def update_counterpart(ctx):
     c = ctx.db.one("SELECT * FROM counterparts WHERE id=?", (ctx.params["id"],))
     if not c:
-        raise not_found("Contrapartida")
+        raise not_found(_t("Contrapartida"))
     data = {k: f.parse(ctx.db, k, ctx.body[k]) for k, f in CP_FIELDS.items() if k in ctx.body}
     merged = {**c, **data}
     _cp_check(merged)
@@ -177,7 +178,7 @@ def update_counterpart(ctx):
 def delete_counterpart(ctx):
     c = ctx.db.one("SELECT * FROM counterparts WHERE id=?", (ctx.params["id"],))
     if not c:
-        raise not_found("Contrapartida")
+        raise not_found(_t("Contrapartida"))
     ctx.db.ex("DELETE FROM counterparts WHERE id=?", (c["id"],))
     audit(ctx, "excluir", "counterparts", c["id"], c["description"][:80], before=c)
     return ST.get(ctx, c["stakeholder_id"])
@@ -195,7 +196,7 @@ def stakeholder_analysis(ctx, season_id):
     def grp(keyf, val="received"):
         g = {}
         for r in rows:
-            k = keyf(r) or "(não informado)"
+            k = keyf(r) or _t("(não informado)")
             g[k] = round(g.get(k, 0) + (r.get(val) or 0), 2)
         return [{"key": k, "value": v} for k, v in sorted(g.items(), key=lambda kv: -kv[1])]
     by_status = {}
@@ -217,9 +218,9 @@ def stakeholder_analysis(ctx, season_id):
         "received_by_area": [x for x in grp(lambda r: areas.get(r["area_id"])) if x["value"]],
         "confirmed_by_level": [x for x in grp(lambda r: r.get("level"), "confirmed") if x["value"]],
         "received_by_level": [x for x in grp(lambda r: r.get("level")) if x["value"]],
-        "formulas": {"Taxa de conversão": "stakeholders confirmados (total ou parcialmente) ÷ stakeholders que receberam proposta",
-                     "Valor recebido": "soma dos recebimentos registrados no caixa vinculados ao stakeholder",
-                     "Apoio não financeiro": "valor estimado dos itens/serviços recebidos por patrocínio ou doação vinculados ao stakeholder"},
+        "formulas": {"Taxa de conversão": _t("stakeholders confirmados (total ou parcialmente) ÷ stakeholders que receberam proposta"),
+                     "Valor recebido": _t("soma dos recebimentos registrados no caixa vinculados ao stakeholder"),
+                     "Apoio não financeiro": _t("valor estimado dos itens/serviços recebidos por patrocínio ou doação vinculados ao stakeholder")},
     }
 
 
@@ -227,5 +228,5 @@ def stakeholder_analysis(ctx, season_id):
 def analysis(ctx):
     judge_module_guard(ctx, "stakeholders")
     if not ctx.query.get("season_id"):
-        raise bad("Informe a temporada.")
+        raise bad(_t("Informe a temporada."))
     return stakeholder_analysis(ctx, ctx.query["season_id"])

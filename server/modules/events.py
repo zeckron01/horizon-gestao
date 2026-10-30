@@ -1,4 +1,5 @@
 """Eventos e calendário (eventos + prazos de entregas)."""
+from ..i18n import _t
 from ..core import F, Resource, add_days, bad, check_order, judge_module_guard, route, today_local
 
 EVENT_STATUS = ("ativo", "cancelado", "realizado")
@@ -6,24 +7,24 @@ EVENT_STATUS = ("ativo", "cancelado", "realizado")
 
 class Events(Resource):
     def validate(self, ctx, e, old):
-        check_order(e, "start_date", "end_date", "Data de início", "Data de término")
+        check_order(e, "start_date", "end_date", _t("Data de início"), _t("Data de término"))
 
 
-EVENT = Events("events", "events", "Evento", {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "name": F("text", "Nome", required=True, max=200),
-    "type": F("text", "Tipo", max=80, filter=True),
-    "description": F("long", "Descrição"),
-    "start_date": F("date", "Data de início", required=True),
-    "end_date": F("date", "Data de término"),
-    "start_time": F("time", "Horário"),
-    "location": F("text", "Local", max=200),
-    "owner_id": F("ref", "Responsável", ref="users", filter=True),
-    "area_id": F("ref", "Área envolvida", ref="areas", filter=True),
-    "objectives": F("long", "Objetivos"),
-    "checklist": F("json", "Checklist preparatório"),
-    "notes": F("long", "Observações"),
-    "status": F("enum", "Situação", options=EVENT_STATUS, default="ativo", filter=True),
+EVENT = Events("events", "events", _t("Evento"), {
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "name": F("text", _t("Nome"), required=True, max=200),
+    "type": F("text", _t("Tipo"), max=80, filter=True),
+    "description": F("long", _t("Descrição")),
+    "start_date": F("date", _t("Data de início"), required=True),
+    "end_date": F("date", _t("Data de término")),
+    "start_time": F("time", _t("Horário")),
+    "location": F("text", _t("Local"), max=200),
+    "owner_id": F("ref", _t("Responsável"), ref="users", filter=True),
+    "area_id": F("ref", _t("Área envolvida"), ref="areas", filter=True),
+    "objectives": F("long", _t("Objetivos")),
+    "checklist": F("json", _t("Checklist preparatório")),
+    "notes": F("long", _t("Observações")),
+    "status": F("enum", _t("Situação"), options=EVENT_STATUS, default="ativo", filter=True),
 }, season=True, order="start_date, name", search=("name", "description", "location"))
 
 
@@ -45,7 +46,7 @@ def calendar(ctx):
     today = today_local(db)
     start, end = q.get("from") or add_days(today, -45), q.get("to") or add_days(today, 120)
     if start > end:
-        raise bad("Intervalo de datas inválido.")
+        raise bad(_t("Intervalo de datas inválido."))
     items = []
     for e in db.q("SELECT * FROM events WHERE season_id=? AND deleted_at IS NULL AND archived_at IS NULL AND start_date<=? AND COALESCE(end_date,start_date)>=? ORDER BY start_date", (sid, end, start)):
         items.append({"kind": "evento", "id": e["id"], "title": e["name"], "start": e["start_date"], "end": e["end_date"] or e["start_date"],

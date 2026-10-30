@@ -2,6 +2,7 @@
 
 Usado no modo PostgreSQL, em que não existe um arquivo de banco para copiar. O arquivo é independente do banco de
 origem: um .hzb gerado a partir do SQLite (python manage.py exportar-backup) pode ser restaurado no PostgreSQL."""
+from .i18n import _t
 import base64
 import gzip
 import hashlib
@@ -54,24 +55,24 @@ def read(data, require_admin=True):
     """Valida o arquivo (formato, soma de verificação, conteúdo mínimo) e devolve (cabeçalho, tabelas).
     require_admin=False é usado só para conferir um backup recém-gerado (ex.: o de segurança de um banco ainda vazio)."""
     if not data[:2] == b"\x1f\x8b":
-        raise BackupError("O arquivo enviado não é um backup desta plataforma (.hzb).")
+        raise BackupError(_t("O arquivo enviado não é um backup desta plataforma (.hzb)."))
     try:
         raw = gzip.decompress(data)
         head_raw, body = raw.split(b"\n", 1)
         head = json.loads(head_raw)
     except Exception:
-        raise BackupError("O arquivo de backup está corrompido (não foi possível ler).")
+        raise BackupError(_t("O arquivo de backup está corrompido (não foi possível ler)."))
     if head.get("format") != MAGIC:
-        raise BackupError("O arquivo enviado não é um backup desta plataforma (.hzb).")
+        raise BackupError(_t("O arquivo enviado não é um backup desta plataforma (.hzb)."))
     if hashlib.sha256(body).hexdigest() != head.get("sha256"):
-        raise BackupError("O arquivo de backup está corrompido (falha na verificação de integridade).")
+        raise BackupError(_t("O arquivo de backup está corrompido (falha na verificação de integridade)."))
     tables = json.loads(body)
     if not REQUIRED <= set(tables):
-        raise BackupError("O arquivo não é um backup completo desta plataforma.")
+        raise BackupError(_t("O arquivo não é um backup completo desta plataforma."))
     u = tables["users"]
     ix = {c: i for i, c in enumerate(u["columns"])}
     if require_admin and not any(r[ix["role"]] == "admin" and r[ix["active"]] and r[ix["password_hash"]] and not r[ix["deleted_at"]] for r in u["rows"]):
-        raise BackupError("O backup não contém nenhum administrador ativo; a restauração deixaria a plataforma sem acesso.")
+        raise BackupError(_t("O backup não contém nenhum administrador ativo; a restauração deixaria a plataforma sem acesso."))
     return head, tables
 
 
@@ -80,7 +81,7 @@ def restore_pg(db, tables, applied_migrations):
     current = set(table_names(db))
     unknown = [t for t in tables if t not in current]
     if unknown:
-        raise BackupError("O backup contém tabelas que esta versão da plataforma não conhece: " + ", ".join(unknown))
+        raise BackupError(_t("O backup contém tabelas que esta versão da plataforma não conhece: {0}", ", ".join(unknown)))
     # As chaves estrangeiras são removidas e recriadas ao final (a recriação revalida todos os vínculos).
     fks = db.q("SELECT conrelid::regclass::text AS tbl, conname, pg_get_constraintdef(oid) AS def FROM pg_constraint "
                "WHERE contype='f' AND connamespace=current_schema()::regnamespace ORDER BY conname")

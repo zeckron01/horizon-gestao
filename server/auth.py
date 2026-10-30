@@ -1,4 +1,5 @@
 """Autenticação (sessões no servidor, senha com scrypt), recuperação de acesso e gestão de usuários."""
+from .i18n import _t, rnd
 import base64
 import hashlib
 import hmac
@@ -36,11 +37,11 @@ def verify_password(password, stored):
 
 def check_password_policy(pw):
     if not isinstance(pw, str) or len(pw) < 8:
-        raise bad("A senha deve ter pelo menos 8 caracteres.", {"password": "Mínimo de 8 caracteres."})
+        raise bad(_t("A senha deve ter pelo menos 8 caracteres."), {"password": _t("Mínimo de 8 caracteres.")})
     if len(pw) > 200:
-        raise bad("A senha é longa demais.")
+        raise bad(_t("A senha é longa demais."))
     if not any(c.isalpha() for c in pw) or not any(c.isdigit() for c in pw):
-        raise bad("A senha deve conter letras e números.", {"password": "Use letras e números."})
+        raise bad(_t("A senha deve conter letras e números."), {"password": _t("Use letras e números.")})
 
 
 def _h(token):
@@ -84,7 +85,7 @@ def _throttle(ip, count=True):
     now = time.time()
     lst = [t for t in _attempts.get(ip, []) if now - t < 600]
     if len(lst) >= 30:
-        raise ApiError(429, "muitas_tentativas", "Muitas tentativas de acesso. Aguarde alguns minutos e tente novamente.")
+        raise ApiError(429, "muitas_tentativas", _t("Muitas tentativas de acesso. Aguarde alguns minutos e tente novamente."))
     if count:
         lst.append(now)
     _attempts[ip] = lst
@@ -106,56 +107,56 @@ def login(ctx):
     _throttle(ctx.ip or "?", count=False)
     email = str(ctx.body.get("email", "")).strip().lower()
     password = str(ctx.body.get("password", ""))
-    generic = ApiError(401, "credenciais_invalidas", "E-mail ou senha incorretos.")
+    generic = ApiError(401, "credenciais_invalidas", _t("E-mail ou senha incorretos."))
     u = ctx.db.one("SELECT * FROM users WHERE email=? AND deleted_at IS NULL", (email,)) if email else None
     if not u or not u["password_hash"]:
         hash_password("tempo-constante")  # reduz diferença de tempo entre usuário existente e inexistente
         _fail(ctx.ip or "?")
-        audit(ctx, "login_falhou", "sessao", None, f"E-mail não cadastrado: {email[:80]}")
+        audit(ctx, "login_falhou", "sessao", None, _t("E-mail não cadastrado: {0}", email[:80]))
         ctx.db.commit()
         raise generic
     nowi = datetime.now(timezone.utc).isoformat()
     if u["locked_until"] and u["locked_until"] > nowi:
-        raise ApiError(429, "conta_bloqueada", "Conta temporariamente bloqueada por excesso de tentativas. Tente novamente em alguns minutos.")
+        raise ApiError(429, "conta_bloqueada", _t("Conta temporariamente bloqueada por excesso de tentativas. Tente novamente em alguns minutos."))
     if not verify_password(password, u["password_hash"]):
         _fail(ctx.ip or "?")
         fails = u["failed_logins"] + 1
         lock = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat() if fails >= 5 else None
         ctx.db.ex("UPDATE users SET failed_logins=?, locked_until=? WHERE id=?", (0 if lock else fails, lock, u["id"]))
         ctx.user = None
-        audit(ctx, "login_falhou", "sessao", u["id"], f"Senha incorreta para {u['name']}")
+        audit(ctx, "login_falhou", "sessao", u["id"], _t("Senha incorreta para {0}", u['name']))
         ctx.db.commit()  # registra a tentativa mesmo devolvendo erro
         raise generic
     if not u["active"]:
-        audit(ctx, "login_falhou", "sessao", u["id"], f"Usuário desativado: {u['name']}")
+        audit(ctx, "login_falhou", "sessao", u["id"], _t("Usuário desativado: {0}", u['name']))
         ctx.db.commit()
-        raise ApiError(403, "usuario_desativado", "Este usuário está desativado. Procure o administrador.")
+        raise ApiError(403, "usuario_desativado", _t("Este usuário está desativado. Procure o administrador."))
     ctx.db.ex("UPDATE users SET failed_logins=0, locked_until=NULL, last_login_at=? WHERE id=?", (now_iso(), u["id"]))
     ctx.db.ex("DELETE FROM sessions WHERE expires_at < ?", (nowi,))
     token = create_session(ctx.db, u["id"], ctx.ip, getattr(ctx, "ua", None))
     ctx.user = u
-    audit(ctx, "login", "sessao", u["id"], f"Acesso de {u['name']}")
+    audit(ctx, "login", "sessao", u["id"], _t("Acesso de {0}", u['name']))
     return SetCookie({"ok": True}, token=token)
 
 
 @route("POST", "/api/auth/logout", allow=ROLES, judge_ok=True)
 def logout(ctx):
     ctx.db.ex("DELETE FROM sessions WHERE token_hash=?", (ctx.session["token_hash"],))
-    audit(ctx, "logout", "sessao", ctx.uid, f"Saída de {ctx.user['name']}")
+    audit(ctx, "logout", "sessao", ctx.uid, _t("Saída de {0}", ctx.user['name']))
     return SetCookie({"ok": True}, clear=True)
 
 
 @route("POST", "/api/auth/senha", allow=ROLES, judge_ok=True)
 def change_own_password(ctx):
     if not verify_password(str(ctx.body.get("current", "")), ctx.user["password_hash"]):
-        raise bad("A senha atual está incorreta.", {"current": "Senha incorreta."})
+        raise bad(_t("A senha atual está incorreta."), {"current": _t("Senha incorreta.")})
     new = ctx.body.get("password")
     check_password_policy(new)
     ctx.db.ex("UPDATE users SET password_hash=?, must_change_password=0, updated_at=?, version=version+1 WHERE id=?",
               (hash_password(new), now_iso(), ctx.uid))
     # encerra as demais sessões do usuário
     ctx.db.ex("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (ctx.uid, ctx.session["token_hash"]))
-    audit(ctx, "trocar_senha", "users", ctx.uid, "Senha alterada pelo próprio usuário")
+    audit(ctx, "trocar_senha", "users", ctx.uid, _t("Senha alterada pelo próprio usuário"))
     return {"ok": True}
 
 
@@ -173,17 +174,16 @@ def forgot(ctx):
     email = str(ctx.body.get("email", "")).strip().lower()
     if not cfg.smtp_configured:
         return {"ok": True, "email_enabled": False,
-                "message": "O envio de e-mails não está configurado. Peça ao administrador um link de redefinição de senha."}
+                "message": _t("O envio de e-mails não está configurado. Peça ao administrador um link de redefinição de senha.")}
     u = ctx.db.one("SELECT * FROM users WHERE email=? AND active=1 AND deleted_at IS NULL AND password_hash IS NOT NULL", (email,))
     if u:
         token = _make_reset(ctx.db, u["id"], None)
         base = cfg.PUBLIC_URL or ""
-        send_mail(u["email"], "Redefinição de senha — Horizon Escuderia",
-                  f"Olá, {u['name']}.\n\nPara definir uma nova senha, acesse (válido por 60 minutos):\n{base}/#/redefinir/{token}\n\n"
-                  "Se você não solicitou, ignore esta mensagem.")
-        audit(ctx, "reset_solicitado", "users", u["id"], "Redefinição de senha solicitada por e-mail")
+        send_mail(u["email"], _t("Redefinição de senha — Horizon Escuderia"),
+                  _t("Olá, {0}.\n\nPara definir uma nova senha, acesse (válido por 60 minutos):\n{1}/#/redefinir/{2}\n\nSe você não solicitou, ignore esta mensagem.", u['name'], base, token))
+        audit(ctx, "reset_solicitado", "users", u["id"], _t("Redefinição de senha solicitada por e-mail"))
     return {"ok": True, "email_enabled": True,
-            "message": "Se o e-mail estiver cadastrado, enviaremos um link de redefinição válido por 60 minutos."}
+            "message": _t("Se o e-mail estiver cadastrado, enviaremos um link de redefinição válido por 60 minutos.")}
 
 
 @route("POST", "/api/auth/redefinir", public=True)
@@ -192,7 +192,7 @@ def reset_password(ctx):
     token = str(ctx.body.get("token", ""))
     r = ctx.db.one("SELECT * FROM password_resets WHERE token_hash=?", (_h(token),))
     if not r or r["used_at"] or r["expires_at"] < datetime.now(timezone.utc).isoformat():
-        raise ApiError(400, "token_invalido", "Link de redefinição inválido ou expirado. Solicite um novo.")
+        raise ApiError(400, "token_invalido", _t("Link de redefinição inválido ou expirado. Solicite um novo."))
     new = ctx.body.get("password")
     check_password_policy(new)
     ctx.db.ex("UPDATE password_resets SET used_at=? WHERE token_hash=?", (now_iso(), r["token_hash"]))
@@ -200,7 +200,7 @@ def reset_password(ctx):
               (hash_password(new), now_iso(), r["user_id"]))
     ctx.db.ex("DELETE FROM sessions WHERE user_id=?", (r["user_id"],))
     ctx.user = ctx.db.one("SELECT * FROM users WHERE id=?", (r["user_id"],))
-    audit(ctx, "redefinir_senha", "users", r["user_id"], "Senha redefinida por link de uso único")
+    audit(ctx, "redefinir_senha", "users", r["user_id"], _t("Senha redefinida por link de uso único"))
     return {"ok": True}
 
 
@@ -229,51 +229,51 @@ def setup_status(ctx):
 def setup(ctx):
     """Cria o primeiro administrador. Exige o token de instalação exibido no log do servidor (ou HORIZON_SETUP_TOKEN)."""
     if has_admin(ctx.db):
-        raise conflict("A plataforma já possui um administrador.")
+        raise conflict(_t("A plataforma já possui um administrador."))
     _throttle("s:" + (ctx.ip or "?"))
     from . import app as app_mod
     if cfg.SERVERLESS and not cfg.SETUP_TOKEN:
-        raise forbidden("Instalação bloqueada: defina a variável de ambiente HORIZON_SETUP_TOKEN na hospedagem e publique novamente.")
+        raise forbidden(_t("Instalação bloqueada: defina a variável de ambiente HORIZON_SETUP_TOKEN na hospedagem e publique novamente."))
     expected = app_mod.setup_token()
     if not expected or not hmac.compare_digest(str(ctx.body.get("token", "")), expected):
-        raise forbidden("Token de instalação inválido. Consulte o log do servidor ou a variável HORIZON_SETUP_TOKEN.")
+        raise forbidden(_t("Token de instalação inválido. Consulte o log do servidor ou a variável HORIZON_SETUP_TOKEN."))
     name = str(ctx.body.get("name", "")).strip()
     email = str(ctx.body.get("email", "")).strip().lower()
     if len(name) < 3:
-        raise bad("Informe o nome completo.", {"name": "Informe o nome completo."})
+        raise bad(_t("Informe o nome completo."), {"name": _t("Informe o nome completo.")})
     F("email", "E-mail", required=True).parse(ctx.db, "email", email)
     check_password_policy(ctx.body.get("password"))
     existing = ctx.db.one("SELECT id FROM users WHERE email=?", (email,))
     if existing:
-        raise conflict("Já existe um usuário com este e-mail.")
+        raise conflict(_t("Já existe um usuário com este e-mail."))
     uid = create_user_record(ctx.db, name, email, ctx.body["password"], "admin", is_teacher=bool(ctx.body.get("is_teacher", True)))
     ctx.user = ctx.db.one("SELECT * FROM users WHERE id=?", (uid,))
-    audit(ctx, "criar", "users", uid, f"Primeiro administrador: {name}")
+    audit(ctx, "criar", "users", uid, _t("Primeiro administrador: {0}", name))
     return {"ok": True}
 
 
 # ------------------------------------------------------------------ usuários / integrantes
 USER_FIELDS = {
-    "name": F("text", "Nome", required=True, max=120),
+    "name": F("text", _t("Nome"), required=True, max=120),
     "email": F("email", "E-mail"),
-    "role": F("enum", "Perfil de acesso", required=True, options=ROLES, filter=True),
-    "is_teacher": F("bool", "Professor técnico"),
-    "area_id": F("ref", "Área", ref="areas", filter=True),
-    "position": F("text", "Função no time", max=120),
-    "phone": F("text", "Telefone", max=40),
-    "active": F("bool", "Ativo", default=1),
+    "role": F("enum", _t("Perfil de acesso"), required=True, options=ROLES, filter=True),
+    "is_teacher": F("bool", _t("Professor técnico")),
+    "area_id": F("ref", _t("Área"), ref="areas", filter=True),
+    "position": F("text", _t("Função no time"), max=120),
+    "phone": F("text", _t("Telefone"), max=40),
+    "active": F("bool", _t("Ativo"), default=1),
 }
 _USER_REFS = (
-    ("activities", "owner_id", "atividade(s) sob sua responsabilidade", "deleted_at IS NULL"),
-    ("activities", "created_by", "atividade(s) criadas", "deleted_at IS NULL"),
-    ("raci", "user_id", "atribuição(ões) na matriz RACI"),
-    ("approvals", "user_id", "registro(s) de aprovação"),
+    ("activities", "owner_id", _t("atividade(s) sob sua responsabilidade"), "deleted_at IS NULL"),
+    ("activities", "created_by", _t("atividade(s) criadas"), "deleted_at IS NULL"),
+    ("raci", "user_id", _t("atribuição(ões) na matriz RACI")),
+    ("approvals", "user_id", _t("registro(s) de aprovação")),
     ("risks", "owner_id", "risco(s)", "deleted_at IS NULL"),
-    ("comments", "author_id", "comentário(s)"),
-    ("movements", "created_by", "movimento(s) financeiro(s)"),
-    ("evidence_members", "user_id", "evidência(s) de monitoramento"),
+    ("comments", "author_id", _t("comentário(s)")),
+    ("movements", "created_by", _t("movimento(s) financeiro(s)")),
+    ("evidence_members", "user_id", _t("evidência(s) de monitoramento")),
     ("stakeholders", "owner_id", "stakeholder(s)", "deleted_at IS NULL"),
-    ("wbs_elements", "owner_id", "elemento(s) da EAP", "deleted_at IS NULL"),
+    ("wbs_elements", "owner_id", _t("elemento(s) da EAP"), "deleted_at IS NULL"),
     ("events", "owner_id", "evento(s)", "deleted_at IS NULL"),
 )
 
@@ -308,7 +308,7 @@ def _parse_user(ctx, body, existing=None):
         if name in body:
             data[name] = f.parse(ctx.db, name, body[name])
         elif existing is None and f.required:
-            raise bad(f"{f.label}: campo obrigatório.", {name: "Campo obrigatório."})
+            raise bad(_t("{0}: campo obrigatório.", f.label), {name: _t("Campo obrigatório.")})
     return data
 
 
@@ -319,21 +319,21 @@ def create_user(ctx):
     if ctx.role != "admin":
         # Gestor só cadastra integrantes sem privilégios e sem credenciais (menor privilégio).
         if data.get("role") != "membro" or password or data.get("is_teacher"):
-            raise forbidden("Somente o administrador pode criar contas com acesso, definir perfis ou marcar o professor técnico.")
+            raise forbidden(_t("Somente o administrador pode criar contas com acesso, definir perfis ou marcar o professor técnico."))
     if password:
         if not data.get("email"):
-            raise bad("Informe o e-mail para criar uma conta com acesso.", {"email": "Obrigatório para contas com acesso."})
+            raise bad(_t("Informe o e-mail para criar uma conta com acesso."), {"email": _t("Obrigatório para contas com acesso.")})
         check_password_policy(password)
     if data.get("role") in ("admin", "gestor", "juiz") and not password:
-        raise bad("Este perfil exige e-mail e senha inicial.", {"password": "Informe uma senha inicial."})
+        raise bad(_t("Este perfil exige e-mail e senha inicial."), {"password": _t("Informe uma senha inicial.")})
     if data.get("email") and ctx.db.one("SELECT 1 FROM users WHERE email=?", (data["email"],)):
-        raise conflict("Já existe um usuário com este e-mail.", fields={"email": "E-mail já cadastrado."})
+        raise conflict(_t("Já existe um usuário com este e-mail."), fields={"email": _t("E-mail já cadastrado.")})
     ts = now_iso()
     uid = new_id()
     ctx.db.insert("users", {"id": uid, **data, "password_hash": hash_password(password) if password else None,
                             "must_change_password": 1 if password else 0, "created_at": ts, "updated_at": ts, "created_by": ctx.uid})
     u = ctx.db.one("SELECT * FROM users WHERE id=?", (uid,))
-    audit(ctx, "criar", "users", uid, f"Usuário {u['name']} ({u['role']})", after={k: u[k] for k in USER_FIELDS})
+    audit(ctx, "criar", "users", uid, _t("Usuário {0} ({1})", u['name'], u['role']), after={k: u[k] for k in USER_FIELDS})
     return _ser_user(ctx, u)
 
 
@@ -341,33 +341,33 @@ def create_user(ctx):
 def update_user(ctx):
     u = ctx.db.one("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not u:
-        raise not_found("Usuário")
+        raise not_found(_t("Usuário"))
     data = _parse_user(ctx, ctx.body, u)
     if ctx.role != "admin":
         if u["role"] != "membro" or any(k in data and data[k] != u[k] for k in ("role", "is_teacher", "active", "email")):
-            raise forbidden("Somente o administrador pode alterar perfis, e-mails de acesso, ativação ou a marcação de professor técnico.")
+            raise forbidden(_t("Somente o administrador pode alterar perfis, e-mails de acesso, ativação ou a marcação de professor técnico."))
     if u["id"] == ctx.uid and (("role" in data and data["role"] != u["role"]) or ("active" in data and not data["active"])):
-        raise forbidden("Você não pode alterar o próprio perfil de acesso nem desativar a própria conta.")
+        raise forbidden(_t("Você não pode alterar o próprio perfil de acesso nem desativar a própria conta."))
     will_admin = data.get("role", u["role"]) == "admin" and data.get("active", u["active"])
     if u["role"] == "admin" and u["active"] and not will_admin and _count_active_admins(ctx.db, u["id"]) == 0:
-        raise conflict("É necessário manter pelo menos um administrador ativo.")
+        raise conflict(_t("É necessário manter pelo menos um administrador ativo."))
     if data.get("email") and ctx.db.one("SELECT 1 FROM users WHERE email=? AND id<>?", (data["email"], u["id"])):
-        raise conflict("Já existe um usuário com este e-mail.", fields={"email": "E-mail já cadastrado."})
+        raise conflict(_t("Já existe um usuário com este e-mail."), fields={"email": _t("E-mail já cadastrado.")})
     if data.get("role", u["role"]) in ("admin", "gestor", "juiz") and not u["password_hash"]:
-        raise bad("Defina uma senha para este usuário antes de atribuir um perfil com acesso.")
+        raise bad(_t("Defina uma senha para este usuário antes de atribuir um perfil com acesso."))
     version = ctx.body.get("version")
     if not isinstance(version, int):
-        raise bad("Informe a versão do registro (version).", code="versao_obrigatoria")
+        raise bad(_t("Informe a versão do registro (version)."), code="versao_obrigatoria")
     if data:
         sets = ", ".join(f"{k}=?" for k in data)
         cur = ctx.db.ex(f"UPDATE users SET {sets}, updated_at=?, version=version+1 WHERE id=? AND version=?",
                         list(data.values()) + [now_iso(), u["id"], version])
         if cur.rowcount == 0:
-            raise conflict("Este usuário foi alterado por outra pessoa. Recarregue antes de salvar.", code="conflito_versao")
+            raise conflict(_t("Este usuário foi alterado por outra pessoa. Recarregue antes de salvar."), code="conflito_versao")
     new = ctx.db.one("SELECT * FROM users WHERE id=?", (u["id"],))
     if not new["active"] or (new["role"] != u["role"]):
         ctx.db.ex("DELETE FROM sessions WHERE user_id=?", (u["id"],))  # desativação/troca de perfil encerra as sessões
-    audit(ctx, "alterar", "users", u["id"], f"Usuário {new['name']}", before={k: u[k] for k in USER_FIELDS}, after={k: new[k] for k in USER_FIELDS})
+    audit(ctx, "alterar", "users", u["id"], _t("Usuário {0}", new['name']), before={k: u[k] for k in USER_FIELDS}, after={k: new[k] for k in USER_FIELDS})
     return _ser_user(ctx, new)
 
 
@@ -375,15 +375,15 @@ def update_user(ctx):
 def admin_set_password(ctx):
     u = ctx.db.one("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not u:
-        raise not_found("Usuário")
+        raise not_found(_t("Usuário"))
     if not u["email"]:
-        raise bad("Cadastre um e-mail para este usuário antes de definir a senha.")
+        raise bad(_t("Cadastre um e-mail para este usuário antes de definir a senha."))
     pw = ctx.body.get("password")
     check_password_policy(pw)
     ctx.db.ex("UPDATE users SET password_hash=?, must_change_password=1, failed_logins=0, locked_until=NULL, updated_at=?, version=version+1 WHERE id=?",
               (hash_password(pw), now_iso(), u["id"]))
     ctx.db.ex("DELETE FROM sessions WHERE user_id=?", (u["id"],))
-    audit(ctx, "definir_senha", "users", u["id"], f"Senha provisória definida para {u['name']}")
+    audit(ctx, "definir_senha", "users", u["id"], _t("Senha provisória definida para {0}", u['name']))
     return {"ok": True}
 
 
@@ -391,14 +391,14 @@ def admin_set_password(ctx):
 def admin_reset_link(ctx):
     u = ctx.db.one("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not u:
-        raise not_found("Usuário")
+        raise not_found(_t("Usuário"))
     if not u["email"]:
-        raise bad("Cadastre um e-mail para este usuário antes de gerar o link.")
+        raise bad(_t("Cadastre um e-mail para este usuário antes de gerar o link."))
     if not u["password_hash"]:
         # conta ainda sem senha: cria um hash inutilizável para habilitar o login após a redefinição
         ctx.db.ex("UPDATE users SET password_hash=? WHERE id=?", ("scrypt$15$8$1$AAAA$AAAA", u["id"]))
     token = _make_reset(ctx.db, u["id"], ctx.uid)
-    audit(ctx, "gerar_link_reset", "users", u["id"], f"Link de redefinição gerado para {u['name']}")
+    audit(ctx, "gerar_link_reset", "users", u["id"], _t("Link de redefinição gerado para {0}", u['name']))
     return {"token": token, "path": f"/#/redefinir/{token}", "expires_minutes": 60}
 
 
@@ -406,20 +406,20 @@ def admin_reset_link(ctx):
 def delete_user(ctx):
     u = ctx.db.one("SELECT * FROM users WHERE id=? AND deleted_at IS NULL", (ctx.params["id"],))
     if not u:
-        raise not_found("Usuário")
+        raise not_found(_t("Usuário"))
     if u["id"] == ctx.uid:
-        raise forbidden("Você não pode excluir a própria conta.")
+        raise forbidden(_t("Você não pode excluir a própria conta."))
     if u["role"] == "admin" and u["active"] and _count_active_admins(ctx.db, u["id"]) == 0:
-        raise conflict("É necessário manter pelo menos um administrador ativo.")
+        raise conflict(_t("É necessário manter pelo menos um administrador ativo."))
     refs = []
     for table, col, label, *cond in _USER_REFS:
         n = ctx.db.val(f"SELECT COUNT(*) FROM {table} WHERE {col}=?" + (f" AND {cond[0]}" if cond else ""), (u["id"],))
         if n:
             refs.append({"label": label, "count": n})
     if refs:
-        raise conflict("Este usuário possui histórico vinculado (" + ", ".join(f"{r['count']} {r['label']}" for r in refs) +
-                       "). Para preservar o histórico, desative-o em vez de excluir.", code="vinculos_existentes", references=refs, can_archive=True)
+        raise conflict(_t("Este usuário possui histórico vinculado ({0}). Para preservar o histórico, desative-o em vez de excluir.",
+                          ", ".join(f"{r['count']} {rnd(r['label'])}" for r in refs)), code="vinculos_existentes", references=refs, can_archive=True)
     ctx.db.ex("DELETE FROM sessions WHERE user_id=?", (u["id"],))
     ctx.db.ex("UPDATE users SET deleted_at=?, active=0, email=NULL, password_hash=NULL, version=version+1 WHERE id=?", (now_iso(), u["id"]))
-    audit(ctx, "excluir", "users", u["id"], f"Usuário {u['name']}")
+    audit(ctx, "excluir", "users", u["id"], _t("Usuário {0}", u['name']))
     return {"ok": True}

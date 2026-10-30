@@ -1,9 +1,10 @@
 """Gerenciamento de riscos: pontuação = probabilidade × impacto, faixas configuráveis, reavaliações e ações de mitigação."""
+from ..i18n import _t
 from ..core import (F, Resource, audit, bad, get_setting, judge_module_guard, not_found, route, today_local, user_names)
 from ..db import new_id, now_iso
 
 RISK_STATUS = ("aberto", "em_tratamento", "monitorado", "ocorrido", "encerrado")
-RISK_STATUS_LABEL = {"aberto": "Aberto", "em_tratamento": "Em tratamento", "monitorado": "Monitorado", "ocorrido": "Ocorrido", "encerrado": "Encerrado"}
+RISK_STATUS_LABEL = {"aberto": _t("Aberto"), "em_tratamento": _t("Em tratamento"), "monitorado": _t("Monitorado"), "ocorrido": _t("Ocorrido"), "encerrado": _t("Encerrado")}
 OPEN = ("aberto", "em_tratamento", "monitorado", "ocorrido")
 
 
@@ -19,16 +20,16 @@ def level_of(scale, score):
 class Risks(Resource):
     def validate(self, ctx, r, old):
         scale = get_setting(ctx.db, "risk_scale")
-        for k, lab in (("probability", "Probabilidade"), ("impact", "Impacto"), ("residual_probability", "Probabilidade residual"), ("residual_impact", "Impacto residual")):
+        for k, lab in (("probability", _t("Probabilidade")), ("impact", _t("Impacto")), ("residual_probability", _t("Probabilidade residual")), ("residual_impact", _t("Impacto residual"))):
             if r.get(k) is not None and not 1 <= r[k] <= scale["size"]:
-                raise bad(f"{lab}: informe um valor de 1 a {scale['size']}.", {k: "Fora da escala configurada."})
+                raise bad(_t("{0}: informe um valor de 1 a {1}.", lab, scale['size']), {k: _t("Fora da escala configurada.")})
         if not r.get("code"):
             n = ctx.db.val("SELECT COUNT(*) FROM risks WHERE season_id=?", (r["season_id"],)) + 1
             while ctx.db.one("SELECT 1 FROM risks WHERE season_id=? AND code=?", (r["season_id"], f"R-{n:03d}")):
                 n += 1
             r["code"] = f"R-{n:03d}"
         elif ctx.db.one("SELECT 1 FROM risks WHERE season_id=? AND code=? AND id<>?", (r["season_id"], r["code"], (old or {}).get("id", ""))):
-            raise bad("Já existe um risco com este código nesta temporada.", {"code": "Código duplicado."})
+            raise bad(_t("Já existe um risco com este código nesta temporada."), {"code": _t("Código duplicado.")})
         if not old and not r.get("identified_at"):
             r["identified_at"] = today_local(ctx.db)
         if old and any(r.get(k) != old.get(k) for k in ("probability", "impact", "residual_probability", "residual_impact")):
@@ -43,9 +44,13 @@ class Risks(Resource):
                     db.ex("INSERT INTO risk_areas (risk_id, area_id) VALUES (?,?)", (r["id"], a))
         for key, typ, table in (("activity_ids", "activity", "activities"), ("wbs_ids", "wbs", "wbs_elements")):
             if isinstance(b.get(key), list):
-                db.ex("DELETE FROM risk_links WHERE risk_id=? AND entity_type=?", (r["id"], typ))
-                for i in dict.fromkeys(b[key]):
-                    if db.one(f"SELECT 1 FROM {table} WHERE id=? AND deleted_at IS NULL", (i,)):
+                # mantém os vínculos que continuam (e o efeito estimado registrado no caminho crítico); só remove/insere a diferença
+                cur = {x["entity_id"] for x in db.q("SELECT entity_id FROM risk_links WHERE risk_id=? AND entity_type=?", (r["id"], typ))}
+                want = [i for i in dict.fromkeys(b[key]) if isinstance(i, str)]
+                for i in cur - set(want):
+                    db.ex("DELETE FROM risk_links WHERE risk_id=? AND entity_type=? AND entity_id=?", (r["id"], typ, i))
+                for i in want:
+                    if i not in cur and db.one(f"SELECT 1 FROM {table} WHERE id=? AND deleted_at IS NULL", (i,)):
                         db.ex("INSERT INTO risk_links (risk_id, entity_type, entity_id) VALUES (?,?,?)", (r["id"], typ, i))
         if old is None or any(r.get(k) != old.get(k) for k in ("probability", "impact", "residual_probability", "residual_impact")):
             if r.get("probability") or r.get("impact"):
@@ -58,30 +63,30 @@ class Risks(Resource):
         return expand_risks(ctx.db, rows)
 
 
-RISK = Risks("risks", "risks", "Risco", {
-    "season_id": F("ref", "Temporada", required=True, ref="seasons"),
-    "code": F("text", "Código", max=20),
-    "title": F("text", "Título", required=True, max=200),
-    "description": F("long", "Descrição"),
-    "category": F("text", "Categoria", max=80, filter=True),
-    "cause": F("long", "Causa provável", max=4000),
-    "risk_event": F("long", "Evento de risco", max=4000),
-    "consequence": F("long", "Consequência", max=4000),
-    "probability": F("int", "Probabilidade", min=1, max=10),
-    "impact": F("int", "Impacto", min=1, max=10),
-    "owner_id": F("ref", "Responsável pelo risco", ref="users", filter=True),
-    "preventive_plan": F("long", "Plano preventivo", max=4000),
-    "contingency_plan": F("long", "Plano de contingência", max=4000),
-    "mitigation": F("long", "Ações de mitigação (resumo)", max=4000),
-    "action_deadline": F("date", "Prazo para executar as ações"),
-    "warning_indicators": F("long", "Indicadores de alerta", max=4000),
-    "status": F("enum", "Situação", options=RISK_STATUS, default="aberto", filter=True),
-    "identified_at": F("date", "Data de identificação"),
-    "last_review_at": F("date", "Data da última avaliação"),
-    "residual_probability": F("int", "Probabilidade residual", min=1, max=10),
-    "residual_impact": F("int", "Impacto residual", min=1, max=10),
-    "occurrence_result": F("long", "Resultado após a ocorrência", max=4000),
-    "notes": F("long", "Observações"),
+RISK = Risks("risks", "risks", _t("Risco"), {
+    "season_id": F("ref", _t("Temporada"), required=True, ref="seasons"),
+    "code": F("text", _t("Código"), max=20),
+    "title": F("text", _t("Título"), required=True, max=200),
+    "description": F("long", _t("Descrição")),
+    "category": F("text", _t("Categoria"), max=80, filter=True),
+    "cause": F("long", _t("Causa provável"), max=4000),
+    "risk_event": F("long", _t("Evento de risco"), max=4000),
+    "consequence": F("long", _t("Consequência"), max=4000),
+    "probability": F("int", _t("Probabilidade"), min=1, max=10),
+    "impact": F("int", _t("Impacto"), min=1, max=10),
+    "owner_id": F("ref", _t("Responsável pelo risco"), ref="users", filter=True),
+    "preventive_plan": F("long", _t("Plano preventivo"), max=4000),
+    "contingency_plan": F("long", _t("Plano de contingência"), max=4000),
+    "mitigation": F("long", _t("Ações de mitigação (resumo)"), max=4000),
+    "action_deadline": F("date", _t("Prazo para executar as ações")),
+    "warning_indicators": F("long", _t("Indicadores de alerta"), max=4000),
+    "status": F("enum", _t("Situação"), options=RISK_STATUS, default="aberto", filter=True),
+    "identified_at": F("date", _t("Data de identificação")),
+    "last_review_at": F("date", _t("Data da última avaliação")),
+    "residual_probability": F("int", _t("Probabilidade residual"), min=1, max=10),
+    "residual_impact": F("int", _t("Impacto residual"), min=1, max=10),
+    "occurrence_result": F("long", _t("Resultado após a ocorrência"), max=4000),
+    "notes": F("long", _t("Observações")),
 }, season=True, order="code", search=("title", "description", "code", "cause", "consequence"))
 
 
@@ -140,10 +145,10 @@ def get_risk(ctx):
 RISK.register(methods=("create", "update", "delete", "archive"))
 
 ACTION_FIELDS = {
-    "description": F("long", "Ação", required=True, max=2000),
-    "owner_id": F("ref", "Responsável", ref="users"),
-    "due_date": F("date", "Prazo"),
-    "status": F("enum", "Situação", options=("pendente", "em_andamento", "concluida", "cancelada"), default="pendente"),
+    "description": F("long", _t("Ação"), required=True, max=2000),
+    "owner_id": F("ref", _t("Responsável"), ref="users"),
+    "due_date": F("date", _t("Prazo")),
+    "status": F("enum", _t("Situação"), options=("pendente", "em_andamento", "concluida", "cancelada"), default="pendente"),
 }
 
 
@@ -151,7 +156,7 @@ ACTION_FIELDS = {
 def add_action(ctx):
     r = RISK.raw(ctx.db, ctx.params["id"])
     if not r:
-        raise not_found("Risco")
+        raise not_found(_t("Risco"))
     data = {k: f.parse(ctx.db, k, ctx.body.get(k, f.default)) for k, f in ACTION_FIELDS.items()}
     ts = now_iso()
     row = {"id": new_id(), "risk_id": r["id"], **data, "done_at": ts if data["status"] == "concluida" else None, "created_at": ts, "updated_at": ts, "created_by": ctx.uid}
@@ -164,7 +169,7 @@ def add_action(ctx):
 def update_action(ctx):
     a = ctx.db.one("SELECT * FROM risk_actions WHERE id=?", (ctx.params["id"],))
     if not a:
-        raise not_found("Ação")
+        raise not_found(_t("Ação"))
     data = {k: f.parse(ctx.db, k, ctx.body[k]) for k, f in ACTION_FIELDS.items() if k in ctx.body}
     if data.get("status") == "concluida" and a["status"] != "concluida":
         data["done_at"] = now_iso()
@@ -182,7 +187,7 @@ def update_action(ctx):
 def delete_action(ctx):
     a = ctx.db.one("SELECT * FROM risk_actions WHERE id=?", (ctx.params["id"],))
     if not a:
-        raise not_found("Ação")
+        raise not_found(_t("Ação"))
     ctx.db.ex("DELETE FROM risk_actions WHERE id=?", (a["id"],))
     audit(ctx, "excluir", "risk_actions", a["id"], a["description"][:80], before=a)
     return RISK.get(ctx, a["risk_id"])
