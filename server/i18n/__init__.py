@@ -66,24 +66,34 @@ def _fmt(tpl, args, lang):
 class Msg(str):
     """Texto do sistema: vale como o português; .render(lang) devolve a versão no idioma pedido."""
 
-    def __new__(cls, key, args=()):
+    def __new__(cls, key, args=(), ctx=None):
         o = super().__new__(cls, _fmt(key, args, "pt-BR"))
-        o.key, o.args = key, tuple(args)
+        o.key, o.args, o.ctx = key, tuple(args), ctx
         return o
 
     def render(self, lang=None):
         lang = lang or _LANG.get()
         key = getattr(self, "key", str(self))
         args = getattr(self, "args", ())
-        tpl = EN.get(key, key) if lang == "en" else key
+        ctx = getattr(self, "ctx", None)
+        if lang == "en":
+            tpl = EN.get(f"{key} @{ctx}", EN.get(key, key)) if ctx else EN.get(key, key)
+        else:
+            tpl = key
         return _fmt(tpl, args, lang)
 
     def __reduce__(self):
-        return (Msg, (getattr(self, "key", str(self)), getattr(self, "args", ())))
+        return (Msg, (getattr(self, "key", str(self)), getattr(self, "args", ()), getattr(self, "ctx", None)))
 
 
 def _t(key, *args):
     return Msg(key, args)
+
+
+def _tc(ctx, key, *args):
+    """Como _t, mas usa a tradução "texto @contexto" do dicionário quando existir (nome específico de um lugar),
+    sem mudar a tradução do mesmo texto nos demais lugares. Em português o texto é o mesmo de _t."""
+    return Msg(key, args, ctx)
 
 
 def localize(obj, lang=None):
