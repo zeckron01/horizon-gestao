@@ -1291,5 +1291,6 @@
  "“{0}”: sem data de início — o início foi deduzido do prazo e da duração.": "“{0}”: no start date — the start was derived from the deadline and duration.",
  "“{0}”: sem datas planejadas — posicionada apenas pelas dependências e pelo início do projeto.": "“{0}”: no planned dates — positioned only by dependencies and the project start.",
  "“{0}”: sem duração nem datas de início e término. Informe a duração necessária ou as datas planejadas.": "“{0}”: no duration or start and finish dates. Enter the required duration or the planned dates.",
- "“{0}”: sem predecessoras nem sucessoras — defina a sequência, se houver.": "“{0}”: no predecessors or successors — define the sequence, if any."
+ "“{0}”: sem predecessoras nem sucessoras — defina a sequência, se houver.": "“{0}”: no predecessors or successors — define the sequence, if any.",
+ "Escopo do projeto @menu-escopo": "Project Charter"
 }
