@@ -1,6 +1,6 @@
 """Central de relatórios: cada relatório é montado dos registros do banco (mesmas funções usadas nas telas)
 e pode ser visto em tela (JSON) ou exportado em PDF, Excel e Word."""
-from ..i18n import _t, fmt_dt_l, fmt_num_l, localize, money_l
+from ..i18n import _t, _tc, fmt_dt_l, fmt_num_l, localize, money_l
 import json
 from datetime import datetime, timezone
 
@@ -38,7 +38,7 @@ CATALOG = [
      "sections": [("resumo", _t("Cumprimento de prazos")), ("areas", _t("Cumprimento por área")), ("marcos", _t("Marcos"))]},
     {"id": "desempenho", "name": _t("Relatório de desempenho da temporada"), "module": "dashboard", "description": _t("Evolução mensal das entregas, desempenho semanal, finanças e riscos da temporada."),
      "sections": [("evolucao", _t("Evolução mensal das entregas")), ("areas", _t("Desempenho por área")), ("semanal", _t("Desempenho semanal registrado")), ("financeiro", _t("Execução financeira")), ("riscos", _t("Riscos"))]},
-    {"id": "escopo", "name": _t("Escopo do projeto"), "module": "escopo", "description": _t("Documento de escopo organizado para apresentação."),
+    {"id": "escopo", "name": _tc("menu-escopo", "Escopo do projeto"), "module": "escopo", "description": _t("Documento de escopo organizado para apresentação."),
      "sections": [("identificacao", _t("Identificação")), ("objetivos", _t("Objetivos e justificativa")), ("entregas", _t("Entregas")), ("limites", _t("Limites, premissas e restrições")), ("criterios", _t("Critérios")), ("referencias", _t("Referências de cronograma, orçamento, riscos e stakeholders")), ("analise", _t("Análise crítica"))]},
     {"id": "eap", "name": _t("Estrutura analítica do projeto (EAP)"), "module": "eap", "description": _t("Hierarquia de entregas, pacotes e atividades."),
      "sections": [("estrutura", _t("Estrutura hierárquica")), ("entregas", _t("Relatório de entregas por pacote"))]},
