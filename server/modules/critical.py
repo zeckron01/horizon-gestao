@@ -758,6 +758,68 @@ def cpm_risks(ctx):
             "computed_at": res["computed_at"]}
 
 
+def problem_paths(ctx, sid):
+    """Um "caminho" por risco cadastrado: aplica os dias de atraso estimados nas atividades ligadas ao risco,
+    recalcula a previsão e devolve o caminho crítico resultante até a data-limite (competição).
+    Tudo é simulação: nada muda no planejamento oficial."""
+    net, base = official(ctx, sid)
+    by_id = {a["id"]: a for a in base["activities"]}
+    db = ctx.db
+    links = {}
+    for l in db.q("SELECT * FROM risk_links WHERE entity_type='activity'"):
+        links.setdefault(l["risk_id"], []).append(l)
+    top = _top_band(db)
+    k0 = base["kpis"]
+    boxes = []
+    for r in risk_rows(db, sid):
+        affected, changes = [], []
+        for l in links.get(r["id"], []):
+            a = by_id.get(l["entity_id"])
+            if not a:
+                continue
+            affected.append({"activity_id": a["id"], "title": a["title"], "area_id": a["area_id"], "days": l["est_delay_days"], "note": l["note"],
+                             "done": a["done"], "in_network": a["in_network"]})
+            if l["est_delay_days"] and a["in_network"] and not a["done"]:
+                changes.append({"kind": "extra_days", "activity_id": a["id"], "days": l["est_delay_days"]})
+        box = {"risk_id": r["id"], "code": r["code"], "title": r["title"], "cause": r.get("cause"), "consequence": r.get("consequence"),
+               "level": r.get("original_level") or r.get("level"), "critical": critical_risk(r, top), "status": r["status"],
+               "mitigation": r.get("mitigation"), "contingency_plan": r.get("contingency_plan"), "preventive_plan": r.get("preventive_plan"),
+               "affected": affected, "extra_days_total": sum(c["days"] for c in changes), "path": [], "forecast_finish": k0["forecast_finish"],
+               "delta_days": 0, "deadline": k0["deadline"], "deadline_margin": k0["deadline_margin"], "estimated": bool(affected)}
+        res = None
+        if changes:
+            sim = simulate(ctx, net, base, {"changes": changes, "risk_id": r["id"]})
+            if sim.get("error"):
+                box["error"] = sim["error"]
+            else:
+                sm, res = sim["summary"], sim["analysis"]
+                box.update({"forecast_finish": sm["forecast_finish"], "delta_days": sm["forecast_delta_days"] or 0, "deadline_margin": sm["deadline_margin"]})
+        src = res or base
+        acts = {a["id"]: a for a in src["activities"]}
+        hit = {c["activity_id"]: c["days"] for c in changes}
+        # caminho: o caminho crítico previsto que passa pelas atividades afetadas (ou o principal, se nenhum passar)
+        paths = src["paths"]["forecast"] or []
+        best = next((p for p in paths if any(i in hit for i in p)), paths[0] if paths else [])
+        for i in best:
+            a = acts.get(i)
+            if a and a["in_network"] and not a["done"]:
+                box["path"].append({"activity_id": i, "title": a["title"], "area_id": a["area_id"], "start": a["forecast"]["start"],
+                                    "finish": a["forecast"]["finish"], "extra_days": hit.get(i, 0)})
+        box["meets_deadline"] = None if box["deadline_margin"] is None else box["deadline_margin"] >= 0
+        boxes.append(box)
+    boxes.sort(key=lambda b: (-(b["delta_days"] or 0), b["code"] or ""))
+    return {"items": boxes, "official": {"forecast_finish": k0["forecast_finish"], "plan_finish": k0["plan_finish"], "deadline": k0["deadline"],
+                                         "deadline_margin": k0["deadline_margin"]}, "computed_at": base["computed_at"]}
+
+
+@route("GET", "/api/cpm/problems")
+def cpm_problems(ctx):
+    _guard(ctx)
+    if ctx.role == "juiz":
+        judge_module_guard(ctx, "riscos")
+    return problem_paths(ctx, ctx.query.get("season_id"))
+
+
 @route("PUT", "/api/cpm/risk-link", allow=STAFF)
 def put_risk_link(ctx):
     db, b = ctx.db, ctx.body
