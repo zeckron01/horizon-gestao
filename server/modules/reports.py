@@ -40,6 +40,9 @@ CATALOG = [
      "sections": [("evolucao", _t("Evolução mensal das entregas")), ("areas", _t("Desempenho por área")), ("semanal", _t("Desempenho semanal registrado")), ("financeiro", _t("Execução financeira")), ("riscos", _t("Riscos"))]},
     {"id": "escopo", "name": _tc("menu-escopo", "Escopo do projeto"), "module": "escopo", "description": _t("Documento de escopo organizado para apresentação."),
      "sections": [("identificacao", _t("Identificação")), ("objetivos", _t("Objetivos e justificativa")), ("entregas", _t("Entregas")), ("limites", _t("Limites, premissas e restrições")), ("criterios", _t("Critérios")), ("referencias", _t("Referências de cronograma, orçamento, riscos e stakeholders")), ("analise", _t("Análise crítica"))]},
+    {"id": "caminho_critico", "name": _t("Caminho crítico: problemas e caminhos até a competição"), "module": "caminho_critico",
+     "description": _t("Para cada risco cadastrado: atividades afetadas, dias de atraso estimados, caminho crítico resultante e nova previsão em relação à data-limite. Simulação; o plano oficial não muda."),
+     "sections": [("resumo", _t("Situação oficial")), ("problemas", _t("Problemas e impacto no prazo")), ("caminhos", _t("Caminho de cada problema até a competição")), ("respostas", _t("Respostas previstas"))]},
     {"id": "eap", "name": _t("Estrutura analítica do projeto (EAP)"), "module": "eap", "description": _t("Hierarquia de entregas, pacotes e atividades."),
      "sections": [("estrutura", _t("Estrutura hierárquica")), ("entregas", _t("Relatório de entregas por pacote"))]},
 ]
@@ -527,10 +530,41 @@ def r_eap(b):
                                                               "rows": [[n["code"], n["name"], b.area(n["area_id"]), n["leaves"], n["leaves_with_data"], n["progress"], n["acceptance_criteria"]] for n in packs]})
 
 
+def r_caminho_critico(b):
+    from .critical import problem_paths
+    d_ = problem_paths(b.ctx, b.o["season_id"])
+    off = d_["official"]
+    margin = off["deadline_margin"]
+    b.add("resumo", _t("Situação oficial"), kv=[
+        (_t("Previsão oficial de conclusão"), fmt_date(off["forecast_finish"])),
+        (_t("Data-limite (competição)"), fmt_date(off["deadline"]) if off["deadline"] else _t("Não definida")),
+        (_t("Margem atual"), _t("{0} dia(s)", margin) if margin is not None else "—"),
+        (_t("Etapa seguinte"), _t("Nacional: data a definir. Quando for cadastrada como data-limite, as margens passam a ser calculadas em relação a ela.")),
+        (_t("Natureza dos números"), _t("Os dias de atraso por problema são estimativas registradas no vínculo risco × atividade (aba Riscos e soluções). Revise-as com a equipe."))])
+    rows = []
+    for x in d_["items"]:
+        aff = "; ".join(f"{a['title']} ({b.area(a['area_id'])}): +{a['days'] or 0}" for a in x["affected"]) or _t("Nenhuma atividade vinculada")
+        ok = x["meets_deadline"]
+        rows.append([x["code"], x["title"], x["level"], aff, x["extra_days_total"], fmt_date(x["forecast_finish"]), x["delta_days"],
+                     x["deadline_margin"] if x["deadline_margin"] is not None else "—",
+                     _t("Sim") if ok else (_t("Não") if ok is False else "—")])
+    b.add("problemas", _t("Problemas e impacto no prazo"), table={
+        "columns": [_t("Código"), _t("Problema"), _t("Nível"), _t("Atividades afetadas (dias)"), _t("Dias somados"), _t("Nova previsão"), _t("Atraso no fim (dias)"), _t("Margem até a data-limite"), _t("Chega a tempo?")],
+        "widths": [4, 12, 5, 22, 4, 6, 4, 5, 4], "rows": rows, "empty": _t("Nenhum risco cadastrado.")})
+    prow = []
+    for x in d_["items"]:
+        steps = " → ".join(f"{p['title']} ({b.area(p['area_id'])}, {fmt_date(p['start'])}–{fmt_date(p['finish'])}{', +' + str(p['extra_days']) if p['extra_days'] else ''})" for p in x["path"])
+        end = _t("Competição em {0}", fmt_date(x["deadline"])) if x["deadline"] else _t("Competição (data a definir)")
+        prow.append([x["code"], x["title"], (steps + " → " if steps else "") + end + " → " + _t("Nacional (a definir)")])
+    b.add("caminhos", _t("Caminho de cada problema até a competição"), table={"columns": [_t("Código"), _t("Problema"), _t("Caminho crítico previsto")], "widths": [4, 10, 34], "rows": prow})
+    b.add("respostas", _t("Respostas previstas"), table={"columns": [_t("Código"), _t("Problema"), _t("Mitigação"), _t("Plano de contingência")], "widths": [4, 10, 17, 17],
+                                                      "rows": [[x["code"], x["title"], x["mitigation"] or "—", x["contingency_plan"] or "—"] for x in d_["items"]]})
+
+
 BUILDERS = {"executivo": r_executivo, "cronograma": r_cronograma, "entregas_area": r_entregas_area, "atrasos": r_atrasos, "monitoramento": r_monitoramento,
             "financeiro": r_financeiro, "patrocinios": r_patrocinios, "riscos": r_riscos, "responsabilidades": r_responsabilidades, "metas": r_metas,
-            "desempenho": r_desempenho, "escopo": r_escopo, "eap": r_eap}
-WIDE = {"cronograma", "atrasos", "financeiro", "patrocinios", "riscos", "responsabilidades", "eap"}
+            "desempenho": r_desempenho, "escopo": r_escopo, "eap": r_eap, "caminho_critico": r_caminho_critico}
+WIDE = {"caminho_critico", "cronograma", "atrasos", "financeiro", "patrocinios", "riscos", "responsabilidades", "eap"}
 
 
 def build_report(ctx, rid, o):
