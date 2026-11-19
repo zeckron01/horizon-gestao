@@ -72,7 +72,9 @@ class Activities(Resource):
             a["progress"] = 100
             if not a.get("actual_end"):
                 a["actual_end"] = today
-            if a.get("actual_end") > today:
+            # gestor e administrador podem registrar a conclusão com data ainda por vir (conclusão antecipada pela gestão);
+            # os demais perfis continuam limitados a datas até hoje
+            if a.get("actual_end") > today and ctx.role not in STAFF:
                 raise bad(_t("A data real de conclusão não pode estar no futuro."), {"actual_end": _t("Data futura.")})
             if a.get("actual_start") and a["actual_start"] > a["actual_end"]:
                 raise bad(_t("Início real não pode ser posterior à conclusão real."), {"actual_start": _t("Posterior à conclusão.")})
@@ -83,7 +85,7 @@ class Activities(Resource):
             a["status"] = "em_revisao" if st == "em_andamento" else st
         if st in ("em_andamento", "em_revisao") and not a.get("actual_start") and old_status == "nao_iniciada":
             a["actual_start"] = min(today, a.get("actual_end") or today)
-        if a.get("actual_start") and a["actual_start"] > today:
+        if a.get("actual_start") and a["actual_start"] > today and ctx.role not in STAFF:
             raise bad(_t("O início real não pode estar no futuro."), {"actual_start": _t("Data futura.")})
         if st != "concluida" and a.get("actual_end") and old and old_status == "concluida":
             a["actual_end"] = None  # reabertura: a data real de conclusão deixa de valer (fica no histórico de auditoria)
