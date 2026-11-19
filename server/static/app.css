@@ -516,3 +516,16 @@ tr.best td { background: var(--good-bg); }
 .method ul { padding-left: 18px; } .method li { margin-bottom: 5px; font-size: .88rem; }
 @media (max-width: 860px) { .cp-cpm-grid { grid-template-columns: 1fr 1fr; } .net-tools .small { display: none; } }
 @media (max-width: 520px) { .topbar .lang-switch button[aria-pressed="true"] { display: none; } .topbar .lang-switch { padding: 2px; } }
+
+/* Caminho crítico: problemas e caminhos até a competição */
+.problem-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; }
+.problem-box { display: flex; flex-direction: column; gap: 8px; border-left: 4px solid var(--warn); }
+.problem-box.late { border-left-color: var(--crit); }
+.problem-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.problem-head .code { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.problem-impact { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; background: var(--surface-2); border-radius: var(--radius); padding: 8px 10px; }
+.problem-impact > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.problem-path { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+.problem-path li.hit { color: var(--crit); }
+.problem-path li.milestone { list-style: square; }
+.crit-text { color: var(--crit); }
