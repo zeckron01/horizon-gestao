@@ -103,6 +103,8 @@ EXP = Expenses("expenses", "expenses", _t("Despesa"), {
     "request_date": F("date", _t("Data da solicitação")),
     "purchase_date": F("date", _t("Data da compra")),
     "due_date": F("date", _t("Data de vencimento")),
+    "need_date": F("date", _t("Data em que o time precisa")),
+    "delivery_date": F("date", _t("Data da entrega realizada")),
     "supplier": F("text", _t("Fornecedor"), max=160),
     "funding_source": F("text", _t("Fonte do recurso"), max=120),
     "payment_method": F("text", _t("Método de pagamento"), max=60),
