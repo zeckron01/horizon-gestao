@@ -21,6 +21,111 @@ def cell_text(v):
     return str(v)
 
 
+
+def _wrap(text, n, k):
+    words, out, cur = str(text or "").split(), [], ""
+    for w in words:
+        if not cur:
+            cur = w
+        elif len(cur) + 1 + len(w) <= n:
+            cur += " " + w
+        else:
+            out.append(cur)
+            cur = w
+    if cur:
+        out.append(cur)
+    if len(out) > k:
+        out = out[:k]
+        out[-1] = out[-1][:n - 1] + "…"
+    return out
+
+
+def _short(d):
+    if not d:
+        return "—"
+    from .i18n import get_lang
+    y, m, dd = d[:10].split("-")
+    if get_lang() == "en":
+        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][int(m) - 1] + " " + str(int(dd))
+    return f"{dd}/{m}"
+
+
+def network_drawing(g, avail, max_h=None, min_scale=0.62):
+    """Diagrama de rede de um imprevisto (mesmas posições da tela). Devolve uma lista de desenhos: diagramas muito
+    largos são divididos em faixas (colunas consecutivas), para o texto continuar legível no papel."""
+    from reportlab.graphics.shapes import Circle, Drawing, Group, Line, Polygon, Rect, String
+    from reportlab.lib import colors
+    red, grey, ink, muted = colors.HexColor("#c62828"), colors.HexColor("#94a3b8"), colors.HexColor("#0f172a"), colors.HexColor("#64748b")
+    blue, blue_ink = colors.HexColor("#4f81bd"), colors.white
+    W, H = float(g["width"]), float(g["height"])
+    sc = min(1.0, avail / W, (max_h / H) if max_h else 1.0)
+    bands = [(0.0, W)]
+    if sc < min_scale and (not max_h or H * min_scale <= max_h):
+        sc = min_scale
+        lim = avail / sc - 30
+        xs = sorted({n["x"] for n in g["nodes"]})
+        bands, b0 = [], xs[0] - 16
+        for x in xs:
+            right = max(n["x"] + n["w"] for n in g["nodes"] if n["x"] == x) + 16
+            if right - b0 > lim and bands is not None and x - 16 > b0:
+                bands.append((b0, x - 16))
+                b0 = x - 16
+        bands.append((b0, W))
+    sc *= 0.98
+    out = []
+    for bi, (x0, x1) in enumerate(bands):
+        bw = x1 - x0
+        d = Drawing(bw * sc, H * sc)
+        grp = Group()
+        fy = lambda y: H - y  # noqa: E731  (o PDF mede y de baixo para cima)
+        fx = lambda x: x - x0  # noqa: E731
+        inside = lambda x: x0 - 0.5 <= x <= x1 + 0.5  # noqa: E731
+        for e in g["edges"]:
+            col, wd = (red, 2.2) if e["crit"] else (grey, 1.1)
+            pts = e["points"]
+            for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
+                ca, cb = max(min(xa, x1), x0), max(min(xb, x1), x0)
+                if ca == cb and xa != xb:
+                    continue
+                if not (inside(xa) or inside(xb) or (xa < x0 and xb > x1)):
+                    continue
+                grp.add(Line(fx(ca), fy(ya), fx(cb), fy(yb), strokeColor=col, strokeWidth=wd))
+            (xa, ya), (xb, yb) = pts[-2], pts[-1]
+            if inside(xb):
+                grp.add(Polygon([fx(xb), fy(yb), fx(xb) - 7, fy(yb) + 3.5, fx(xb) - 7, fy(yb) - 3.5], fillColor=col, strokeColor=col, strokeWidth=0.5))
+            elif pts[0][0] < x1 < xb:   # continua na próxima faixa
+                grp.add(String(bw - 4, fy(ya if xa >= x1 else yb) + 3, "»", fontName="Helvetica-Bold", fontSize=11, fillColor=col, textAnchor="end"))
+        for n in g["nodes"]:
+            x, y, w, h = n["x"], n["y"], n["w"], n["h"]
+            if not (x0 <= x < x1):
+                continue
+            x = fx(x)
+            stroke = red if n.get("crit") else colors.HexColor("#1f3b63")
+            sw = 2 if n.get("crit") else 1
+            if n["kind"] in ("inicio", "fim"):
+                grp.add(Circle(x + w / 2, fy(y + h / 2), w / 2, fillColor=blue, strokeColor=stroke, strokeWidth=sw))
+                grp.add(String(x + w / 2, fy(y + h / 2) - 3, n["title"], fontName="Helvetica-Bold", fontSize=8, fillColor=blue_ink, textAnchor="middle"))
+                continue
+            ev = n["kind"] == "evento"
+            grp.add(Rect(x, fy(y + h), w, h, rx=5, ry=5, fillColor=colors.HexColor("#fff4e5") if ev else blue, strokeColor=stroke, strokeWidth=sw,
+                         strokeDashArray=[3, 2] if ev else None))
+            tc = ink if ev else blue_ink
+            for i, line in enumerate(_wrap(n["title"], 26, 2)):
+                grp.add(String(x + 7, fy(y + 15 + i * 13), line, fontName="Helvetica-Bold", fontSize=8.4, fillColor=tc))
+            if ev:
+                meta = _short(n.get("start"))
+            else:
+                meta = (_t("{0} dias", n["days"]) if n.get("days") is not None else "—") + f" · {_short(n.get('start'))}→{_short(n.get('end'))}"
+            grp.add(String(x + 7, fy(y + h - 9), meta, fontName="Helvetica", fontSize=7.4, fillColor=muted if ev else blue_ink))
+            if not ev and n.get("delay"):
+                grp.add(Rect(x + w - 34, fy(y + h - 4), 30, 13, rx=3, ry=3, fillColor=red, strokeColor=red))
+                grp.add(String(x + w - 19, fy(y + h - 13), f"+{n['delay']}", fontName="Helvetica-Bold", fontSize=7.6, fillColor=colors.white, textAnchor="middle"))
+        grp.transform = (sc, 0, 0, sc, 0, 0)
+        d.add(grp)
+        out.append(d)
+    return out
+
+
 # ----------------------------------------------------------------------------- PDF
 def to_pdf(doc, logo=None):
     from reportlab.lib import colors
@@ -149,6 +254,15 @@ def to_pdf(doc, logo=None):
                       ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5), ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4)]
                 t.setStyle(TableStyle(st))
                 flow.append(t)
+        if sec.get("network"):
+            flow.append(Spacer(1, 2 * mm))
+            for k_, dr in enumerate(network_drawing(sec["network"], avail, page[1] - 70 * mm)):
+                if k_:
+                    flow.append(Spacer(1, 3 * mm))
+                flow.append(dr)
+            if sec.get("network_caption"):
+                flow.append(P(sec["network_caption"], ParagraphStyle("nc", parent=center, textColor=colors.HexColor("#c62828"), fontName="Helvetica-Bold")))
+            flow.append(Spacer(1, 4 * mm))
         if sec.get("note"):
             flow.append(P(sec["note"], note))
         if sec.get("page_break"):
