@@ -41,8 +41,8 @@ CATALOG = [
     {"id": "escopo", "name": _tc("menu-escopo", "Escopo do projeto"), "module": "escopo", "description": _t("Documento de escopo organizado para apresentação."),
      "sections": [("identificacao", _t("Identificação")), ("objetivos", _t("Objetivos e justificativa")), ("entregas", _t("Entregas")), ("limites", _t("Limites, premissas e restrições")), ("criterios", _t("Critérios")), ("referencias", _t("Referências de cronograma, orçamento, riscos e stakeholders")), ("analise", _t("Análise crítica"))]},
     {"id": "caminho_critico", "name": _t("Caminho crítico: problemas e caminhos até a competição"), "module": "caminho_critico",
-     "description": _t("Para cada risco cadastrado: atividades afetadas, dias de atraso estimados, caminho crítico resultante e nova previsão em relação à data-limite. Simulação; o plano oficial não muda."),
-     "sections": [("resumo", _t("Situação oficial")), ("problemas", _t("Problemas e impacto no prazo")), ("caminhos", _t("Caminho de cada problema até a competição")), ("respostas", _t("Respostas previstas"))]},
+     "description": _t("Imprevistos que aconteceram e que podem acontecer, cada um com o diagrama de rede do caminho até a competição, as datas e o impacto no prazo. Simulação; o plano oficial não muda."),
+     "sections": [("resumo", _t("Situação oficial")), ("ocorridos", _t("Imprevistos que aconteceram na temporada")), ("problemas", _t("Imprevistos e impacto no prazo")), ("caminhos", _t("Caminho de cada imprevisto possível até a competição")), ("respostas", _t("Respostas previstas"))]},
     {"id": "eap", "name": _t("Estrutura analítica do projeto (EAP)"), "module": "eap", "description": _t("Hierarquia de entregas, pacotes e atividades."),
      "sections": [("estrutura", _t("Estrutura hierárquica")), ("entregas", _t("Relatório de entregas por pacote"))]},
 ]
@@ -99,14 +99,14 @@ def pct(v):
 
 def _act_row(b, a, critical=()):
     dev = a["days_late"] if (a["is_late"] or a["completed_late"]) else 0
-    return [b.area(a["area_id"]), a["seq"] or "", a["title"], b.user(a["owner_id"]), fmt_date(a["planned_start"]), fmt_date(a["planned_end"]),
+    return [b.area(a["area_id"]), a["title"], b.user(a["owner_id"]), fmt_date(a["planned_start"]), fmt_date(a["planned_end"]),
             fmt_date(a["actual_start"]), fmt_date(a["actual_end"]), STATUS_LABEL[a["status"]] + (" (atrasada)" if a["is_late"] else ""), a["progress"], dev,
-            ", ".join(f"{p['seq'] or p['title'][:18]} ({p['type']}{'%+d' % p['lag_days'] if p['lag_days'] else ''})" for p in a["predecessors"]) or "—",
+            "; ".join(f"{p['title'][:30]} ({p['type']}{'%+d' % p['lag_days'] if p['lag_days'] else ''})" for p in a["predecessors"]) or "—",
             _t("Sim") if a["id"] in critical else _t("Não")]
 
 
-ACT_COLS = [_t("Área"), "Nº", _t("Atividade"), _t("Responsável"), _t("Início plan."), _t("Término plan."), _t("Início real"), _t("Término real"), _t("Situação"), "%", _t("Desvio (dias)"), _t("Depende de"), _t("Crítica")]
-ACT_W = [9, 3, 20, 10, 7, 7, 7, 7, 10, 3, 5, 9, 4]
+ACT_COLS = [_t("Área"), _t("Atividade"), _t("Responsável"), _t("Início plan."), _t("Término plan."), _t("Início real"), _t("Término real"), _t("Situação"), "%", _t("Desvio (dias)"), _t("Depende de"), _t("Crítica")]
+ACT_W = [9, 20, 10, 7, 7, 7, 7, 10, 3, 5, 12, 4]
 
 
 # ----------------------------------------------------------------------------- relatórios
@@ -308,14 +308,14 @@ def r_financeiro(b):
         exps = [e for e in exps if e["area_id"] == o["area_id"]]
     sts = {s["id"]: s["name"] for s in b.db.q("SELECT id, name FROM stakeholders")}
     b.add("despesas", _t("Despesas"), table={
-        "columns": [_t("Item"), _t("Área"), _t("Categoria"), _t("Fornecedor"), _t("Qtd."), _t("Un."), _t("Unit. planejado"), _t("Total planejado"), _t("Total realizado"), _t("Pago"), _t("Pendente"), _t("Situação"), _t("Vencimento"), _t("Pagamento")],
-        "widths": [14, 7, 7, 8, 3, 4, 6, 6, 6, 6, 6, 7, 6, 6],
+        "columns": [_t("Item"), _t("Área"), _t("Categoria"), _t("Fornecedor"), _t("Qtd."), _t("Un."), _t("Unit. planejado"), _t("Total planejado"), _t("Total realizado"), _t("Pago"), _t("Pendente"), _t("Situação"), _t("Precisa até"), _t("Entregue em"), _t("Vencimento"), _t("Pagamento")],
+        "widths": [14, 7, 7, 8, 3, 4, 6, 6, 6, 6, 6, 7, 6, 6, 6, 6],
         "rows": [[e["name"], b.area(e["area_id"]), e["category"], e["supplier"], e["quantity"], e["unit"], e["unit_planned"], e["total_planned"], e["total_actual"], e["paid"], e["pending"],
-                  EXP_STATUS_LABEL[e["status"]], fmt_date(e["due_date"]), fmt_date(e["payment_date"])] for e in exps if e["is_cash"]], "empty": _t("Nenhuma despesa em dinheiro cadastrada.")})
+                  EXP_STATUS_LABEL[e["status"]], fmt_date(e.get("need_date")), fmt_date(e.get("delivery_date")), fmt_date(e["due_date"]), fmt_date(e["payment_date"])] for e in exps if e["is_cash"]], "empty": _t("Nenhuma despesa em dinheiro cadastrada.")})
     b.add("apoio", _t("Itens obtidos por patrocínio ou doação"), table={
-        "columns": [_t("Item"), _t("Área"), _t("Tipo de aquisição"), _t("Patrocinador"), _t("Valor estimado")], "widths": [16, 8, 14, 10, 7],
+        "columns": [_t("Item"), _t("Área"), _t("Tipo de aquisição"), _t("Patrocinador"), _t("Valor estimado"), _t("Precisa até"), _t("Entregue em")], "widths": [16, 8, 14, 10, 7, 6, 6],
         "rows": [[e["name"], b.area(e["area_id"]), types.get(e["acquisition_type"], {}).get("label", e["acquisition_type"]), sts.get(e["stakeholder_id"], "—"),
-                  e["total_actual"] if e["total_actual"] is not None else e["total_planned"]] for e in exps if not e["is_cash"]], "empty": _t("Nenhum item recebido por patrocínio ou doação.")},
+                  e["total_actual"] if e["total_actual"] is not None else e["total_planned"], fmt_date(e.get("need_date")), fmt_date(e.get("delivery_date"))] for e in exps if not e["is_cash"]], "empty": _t("Nenhum item recebido por patrocínio ou doação.")},
           note=_t("Estes itens não são saídas de caixa: o valor estimado registra apenas o apoio recebido."))
     incs = INC.expand(b.ctx, [INC.ser(i) for i in b.db.q("SELECT * FROM incomes WHERE season_id=? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY expected_date", (o["season_id"],))])
     b.add("receitas", _t("Receitas e captação"), table={
@@ -536,28 +536,53 @@ def r_caminho_critico(b):
     off = d_["official"]
     margin = off["deadline_margin"]
     b.add("resumo", _t("Situação oficial"), kv=[
-        (_t("Previsão oficial de conclusão"), fmt_date(off["forecast_finish"])),
+        (_t("Conclusão planejada"), fmt_date(off["forecast_finish"])),
         (_t("Data-limite (competição)"), fmt_date(off["deadline"]) if off["deadline"] else _t("Não definida")),
         (_t("Margem atual"), _t("{0} dia(s)", margin) if margin is not None else "—"),
         (_t("Etapa seguinte"), _t("Nacional: data a definir. Quando for cadastrada como data-limite, as margens passam a ser calculadas em relação a ela.")),
-        (_t("Natureza dos números"), _t("Os dias de atraso por problema são estimativas registradas no vínculo risco × atividade (aba Riscos e soluções). Revise-as com a equipe."))])
+        (_t("Como ler os diagramas"), _t("Início → imprevisto → atividades afetadas → Fim. As setas são as dependências do cronograma; o caminho crítico (em vermelho) é a sequência que define a data final. Imprevistos ocorridos usam as datas reais da Matriz Gantt; os possíveis somam os dias de atraso estimados (aba Riscos e soluções) e propagam pelas dependências.")),
+        (_t("Natureza dos números"), _t("Os dias de atraso dos imprevistos possíveis são estimativas; datas e vínculos marcados para revisão devem ser conferidos pela equipe."))])
+
+    def block(key, x):
+        ok = x["meets_deadline"]
+        g = x["graph"]
+        kv = [(_t("Quando aconteceu") if x["occurred"] else _t("Pode acontecer a partir de"), fmt_date(x["event_date"])),
+              (_t("Causa"), x["cause"] or "—"), (_t("Como comprometeu o projeto"), x["consequence"] or "—")]
+        if x["occurred"]:
+            kv += [(_t("Maior atraso"), _t("{0} dia(s)", x["max_delay"])), (_t("Trabalho afetado concluído em"), fmt_date(x["forecast_finish"]))]
+        else:
+            kv += [(_t("Atraso estimado"), _t("+{0} dia(s) nas atividades", x["extra_days_total"]) if x["extra_days_total"] else _t("não estimado")),
+                   (_t("Nova data de conclusão"), fmt_date(x["forecast_finish"]) + (" " + _t("(+{0} no fim)", x["delta_days"]) if x["delta_days"] > 0 else ""))]
+        kv += [(_t("Chega à competição?"), "—" if ok is None else (_t("Sim, margem de {0} dia(s)", x["deadline_margin"]) if ok else _t("Não: {0} dia(s) depois", -x["deadline_margin"]))),
+               (_t("Caminho crítico"), _t("{0} dia(s)", g["critical_days"]) + (f" ({fmt_date(g['critical_start'])} → {fmt_date(g['critical_end'])})" if g["critical_start"] else "") + " — "
+                + " → ".join([_t("Início"), x["title"]] + [p["title"] for p in x["path"]] + [_t("Fim")]))]
+        if x["occurred"] and x.get("occurrence_result"):
+            kv.append((_t("O que aconteceu"), x["occurrence_result"]))
+        if x["mitigation"] or x["contingency_plan"]:
+            kv.append((_t("Resposta prevista"), x["mitigation"] or x["contingency_plan"]))
+        if x["needs_review"] and x.get("review_note"):
+            kv.append((_t("Revisar"), x["review_note"]))
+        b.add(key, f"{x['code']} — {x['title']}", kv=kv, network=g, network_caption=_t("Caminho crítico = {0} dia(s)", g["critical_days"]))
+
+    occ = [x for x in d_["items"] if x["occurred"]]
+    pot = [x for x in d_["items"] if not x["occurred"]]
+    if occ:
+        b.add("ocorridos", _t("Imprevistos que aconteceram na temporada"), text=_t("Datas planejadas (linha de base) comparadas com as datas reais da Matriz Gantt."))
+        for x in occ:
+            block("ocorridos", x)
     rows = []
     for x in d_["items"]:
-        aff = "; ".join(f"{a['title']} ({b.area(a['area_id'])}): +{a['days'] or 0}" for a in x["affected"]) or _t("Nenhuma atividade vinculada")
         ok = x["meets_deadline"]
-        rows.append([x["code"], x["title"], x["level"], aff, x["extra_days_total"], fmt_date(x["forecast_finish"]), x["delta_days"],
-                     x["deadline_margin"] if x["deadline_margin"] is not None else "—",
-                     _t("Sim") if ok else (_t("Não") if ok is False else "—")])
-    b.add("problemas", _t("Problemas e impacto no prazo"), table={
-        "columns": [_t("Código"), _t("Problema"), _t("Nível"), _t("Atividades afetadas (dias)"), _t("Dias somados"), _t("Nova previsão"), _t("Atraso no fim (dias)"), _t("Margem até a data-limite"), _t("Chega a tempo?")],
-        "widths": [4, 12, 5, 22, 4, 6, 4, 5, 4], "rows": rows, "empty": _t("Nenhum risco cadastrado.")})
-    prow = []
-    for x in d_["items"]:
-        steps = " → ".join(f"{p['title']} ({b.area(p['area_id'])}, {fmt_date(p['start'])}–{fmt_date(p['finish'])}{', +' + str(p['extra_days']) if p['extra_days'] else ''})" for p in x["path"])
-        end = _t("Competição em {0}", fmt_date(x["deadline"])) if x["deadline"] else _t("Competição (data a definir)")
-        prow.append([x["code"], x["title"], (steps + " → " if steps else "") + end + " → " + _t("Nacional (a definir)")])
-    b.add("caminhos", _t("Caminho de cada problema até a competição"), table={"columns": [_t("Código"), _t("Problema"), _t("Caminho crítico previsto")], "widths": [4, 10, 34], "rows": prow})
-    b.add("respostas", _t("Respostas previstas"), table={"columns": [_t("Código"), _t("Problema"), _t("Mitigação"), _t("Plano de contingência")], "widths": [4, 10, 17, 17],
+        rows.append([x["code"], x["title"], _t("Ocorrido") if x["occurred"] else (x["level"] or "—"), fmt_date(x["event_date"]),
+                     _t("{0} dia(s)", x["max_delay"]) if x["occurred"] else (x["extra_days_total"] or "—"), fmt_date(x["forecast_finish"]),
+                     x["delta_days"], x["deadline_margin"] if x["deadline_margin"] is not None else "—", _t("Sim") if ok else (_t("Não") if ok is False else "—")])
+    b.add("problemas", _t("Imprevistos e impacto no prazo"), table={
+        "columns": [_t("Código"), _t("Imprevisto"), _t("Nível"), _t("Data"), _t("Atraso (dias)"), _t("Conclusão"), _t("Atraso no fim (dias)"), _t("Margem até a data-limite"), _t("Chega a tempo?")],
+        "widths": [4, 12, 5, 6, 5, 6, 4, 5, 4], "rows": rows, "empty": _t("Nenhum risco cadastrado.")})
+    b.add("caminhos", _t("Caminho de cada imprevisto possível até a competição"), text=_t("Riscos cadastrados que ainda podem acontecer: o que muda se cada um ocorrer."))
+    for x in pot:
+        block("caminhos", x)
+    b.add("respostas", _t("Respostas previstas"), table={"columns": [_t("Código"), _t("Imprevisto"), _t("Mitigação"), _t("Plano de contingência")], "widths": [4, 10, 17, 17],
                                                       "rows": [[x["code"], x["title"], x["mitigation"] or "—", x["contingency_plan"] or "—"] for x in d_["items"]]})
 
 
