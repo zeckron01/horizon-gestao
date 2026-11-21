@@ -529,3 +529,26 @@ tr.best td { background: var(--good-bg); }
 .problem-path li.hit { color: var(--crit); }
 .problem-path li.milestone { list-style: square; }
 .crit-text { color: var(--crit); }
+
+/* Imprevistos e caminhos: diagrama de rede de cada imprevisto */
+.problem-list { display: flex; flex-direction: column; gap: 14px; }
+.problem-box.occurred { border-left-color: var(--crit); }
+.pnet-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); padding: 4px; }
+.pnet { display: block; max-width: none; }
+.pnet .pn-edge { fill: none; stroke: color-mix(in srgb, var(--muted) 75%, transparent); stroke-width: 1.4; }
+.pnet .pn-edge.crit { stroke: var(--crit); stroke-width: 2.8; }
+.pnet .pn-ah { fill: color-mix(in srgb, var(--muted) 75%, transparent); }
+.pnet .pn-ah.crit { fill: var(--crit); }
+.pnet .pn-node rect, .pnet .pn-node circle { fill: #4f81bd; stroke: #1f3b63; stroke-width: 1.2; }
+.pnet .pn-node text { fill: #fff; font-size: 11.5px; }
+.pnet .pn-node .tt { font-weight: 650; }
+.pnet .pn-node .meta { font-size: 10.5px; opacity: .95; }
+.pnet .pn-node .late { fill: #ffd2d2; font-weight: 750; }
+.pnet .pn-node.circ text { font-weight: 700; }
+.pnet .pn-node.ev rect { fill: color-mix(in srgb, var(--warn-bg) 80%, var(--surface)); stroke: var(--crit); stroke-dasharray: 5 3; }
+.pnet .pn-node.ev text { fill: var(--text); }
+.pnet .pn-node.ev .meta { fill: var(--text-2); }
+.pnet .pn-node.crit rect, .pnet .pn-node.crit circle { stroke: var(--crit); stroke-width: 2.6; }
+.pnet .pn-node.click { cursor: pointer; }
+.pnet .pn-node.click:hover rect { filter: brightness(1.08); }
+.pnet .pn-node.click:focus { outline: none; } .pnet .pn-node.click:focus-visible rect { stroke: var(--primary); stroke-width: 3; }
