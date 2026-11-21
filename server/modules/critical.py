@@ -16,7 +16,7 @@ Nada aqui inventa dados: atividade sem duração ou sem datas suficientes aparec
 import json
 import math
 import unicodedata
-from datetime import date
+from datetime import date, timedelta
 
 from ..cpm import DEP_TYPES, Calendar, CycleError, compute, edge_slack
 from ..core import (INTERNAL, STAFF, audit, bad, conflict, forbidden, get_setting, judge_module_guard, not_found, route,
@@ -758,58 +758,276 @@ def cpm_risks(ctx):
             "computed_at": res["computed_at"]}
 
 
+# ----------------------------------------------------------------------------- imprevistos (problemas) e seus caminhos
+# Cada risco vira uma caixa com um diagrama de rede (Início → imprevisto → atividades → Fim), como no método do caminho
+# crítico: as setas são as dependências reais do cronograma e o caminho crítico (em vermelho) é a sequência que define a
+# data final. Trabalha com as DATAS do cronograma (dias corridos), sem recalcular o CPM:
+# - risco ainda não ocorrido: "e se acontecer?" — soma os dias de atraso estimados às atividades ligadas ao risco e
+#   propaga o atraso pelas dependências (descontando a folga entre as datas planejadas) até a data final;
+# - risco ocorrido: mostra o que aconteceu de fato — datas planejadas (linha de base) contra datas reais do Gantt.
+# Nada é gravado: o planejamento oficial não muda.
+NW, NH, NGX, NGY, NR, NPAD, NMAX = 156, 62, 44, 14, 26, 16, 5
+
+
+def _d(s):
+    try:
+        return date.fromisoformat(str(s)[:10]) if s else None
+    except ValueError:
+        return None
+
+
+def _dd(a, b):
+    return (a - b).days if a and b else None
+
+
+def _slack(t, p, s):
+    """Folga entre duas atividades ligadas, pelas datas planejadas (negativa = já conflitam; tratada como zero)."""
+    ps, pe, ss, se = p["ps"], p["pe"], s["ps"], s["pe"]
+    v = {"FS": _dd(ss, pe) - 1 if ss and pe else None, "FF": _dd(se, pe), "SS": _dd(ss, ps), "SF": _dd(se, ps)}.get(t or "FS")
+    return max(0, v or 0)
+
+
+def _layout(nodes, edges, crit):
+    """Posições do diagrama (as mesmas na tela e no PDF): coluna = ordem lógica; Início e Fim como círculos."""
+    ids = [n["id"] for n in nodes]
+    preds = {i: [] for i in ids}
+    for a, b in edges:
+        preds[b].append(a)
+    level = {}
+
+    def lv(i, seen=()):
+        if i in level:
+            return level[i]
+        if i in seen:
+            return 0
+        level[i] = 0 if not preds[i] else 1 + max(lv(p, seen + (i,)) for p in preds[i])
+        return level[i]
+
+    for i in ids:
+        lv(i)
+    by_level = {}
+    for n in nodes:
+        by_level.setdefault(level[n["id"]], []).append(n)
+    cols, k = {}, 0
+    for c in sorted(by_level):   # colunas com muitas atividades em paralelo são divididas (no máximo NMAX por coluna)
+        col = sorted(by_level[c], key=lambda n: (0 if n["id"] in crit else 1, n.get("start") or "", n.get("title") or ""))
+        for j in range(0, len(col), NMAX):
+            cols[k] = col[j:j + NMAX]
+            k += 1
+    height = max(len(v) for v in cols.values()) * (NH + NGY) - NGY + 2 * NPAD
+    x = NPAD
+    for c in sorted(cols):
+        col = cols[c]
+        circle = all(n["kind"] in ("inicio", "fim") for n in col)
+        w = 2 * NR if circle else NW
+        tot = len(col) * (NH + NGY) - NGY
+        y = (height - tot) / 2
+        for n in col:
+            if n["kind"] in ("inicio", "fim"):
+                n.update(x=x, y=y + NH / 2 - NR, w=2 * NR, h=2 * NR)
+            else:
+                n.update(x=x, y=y, w=NW, h=NH)
+            y += NH + NGY
+        x += w + NGX
+    by = {n["id"]: n for n in nodes}
+    out = []
+    for a, b in edges:
+        p, s = by[a], by[b]
+        x1, y1, x2, y2 = p["x"] + p["w"], p["y"] + p["h"] / 2, s["x"], s["y"] + s["h"] / 2
+        xm = x2 - NGX / 2
+        pts = [[x1, y1], [x2, y2]] if abs(y1 - y2) < 1 else [[x1, y1], [xm, y1], [xm, y2], [x2, y2]]
+        on = a in crit and b in crit and crit.index(b) == crit.index(a) + 1
+        out.append({"from": a, "to": b, "crit": on, "points": [[round(u, 1), round(v, 1)] for u, v in pts]})
+    for n in nodes:
+        for k in ("x", "y", "w", "h"):
+            n[k] = round(n[k], 1)
+        n["crit"] = n["id"] in crit
+    return {"width": round(x - NGX + NPAD, 1), "height": round(height, 1), "nodes": nodes, "edges": out}
+
+
+def _graph(box_acts, A, deps, ev_title, ev_date, start_of, end_of, delay_of, plan_of, occurred=False):
+    """Monta o diagrama de uma caixa e acha o caminho crítico (a sequência que define a data final)."""
+    ids = set(box_acts)
+    edges_in = [(d["predecessor_id"], d["successor_id"]) for d in deps if d["predecessor_id"] in ids and d["successor_id"] in ids]
+    preds = {i: [] for i in ids}
+    succs = {i: [] for i in ids}
+    for a, b in edges_in:
+        preds[b].append(a)
+        succs[a].append(b)
+    crit = []
+    if ids and occurred:
+        # ocorrido: a sequência de atividades ligadas que mais acumulou atraso, do imprevisto até o fim do trabalho afetado
+        best, back = {}, {}
+
+        def acc(i, seen=()):
+            if i in best:
+                return best[i]
+            cand = [(acc(p, seen + (i,)), p) for p in preds[i] if p not in seen]
+            top = max(cand, key=lambda c: (c[0][0], c[0][1])) if cand else ((0, date.min), None)
+            best[i] = (top[0][0] + (delay_of(i) or 0), max(top[0][1], end_of(i) or date.min))
+            back[i] = top[1]
+            return best[i]
+
+        cur = max(ids, key=lambda i: (acc(i)[0] if not succs[i] else -1, acc(i)[1]))
+        while cur and cur not in crit:
+            crit.insert(0, cur)
+            cur = back.get(cur)
+    elif ids:
+        # possível: da atividade que termina por último, volta sempre pela predecessora que termina mais tarde
+        cur = max(ids, key=lambda i: (end_of(i) or date.min, delay_of(i)))
+        while cur and cur not in crit:
+            crit.insert(0, cur)
+            ps = [p for p in preds[cur] if end_of(p)]
+            cur = max(ps, key=lambda p: (end_of(p), delay_of(p))) if ps else None
+    crit = ["inicio", "ev"] + crit + ["fim"]
+    nodes = [{"id": "inicio", "kind": "inicio", "title": _t("Início")},
+             {"id": "ev", "kind": "evento", "title": ev_title, "start": ev_date.isoformat() if ev_date else None}]
+    for i in sorted(ids, key=lambda i: (start_of(i) or date.max, A[i]["title"])):
+        s, e = start_of(i), end_of(i)
+        ps, pe = plan_of(i)
+        nodes.append({"id": i, "kind": "atividade", "title": A[i]["title"], "area_id": A[i]["area_id"],
+                      "start": s.isoformat() if s else None, "end": e.isoformat() if e else None,
+                      "days": (_dd(e, s) + 1) if s and e else None, "delay": delay_of(i),
+                      "plan_start": ps.isoformat() if ps else None, "plan_end": pe.isoformat() if pe else None})
+    nodes.append({"id": "fim", "kind": "fim", "title": _t("Fim")})
+    edges = [("inicio", "ev")] + [("ev", i) for i in sorted(ids) if not preds[i]] + sorted(edges_in) \
+        + [(i, "fim") for i in sorted(ids) if not succs[i]]
+    if not ids:
+        edges.append(("ev", "fim"))
+    g = _layout(nodes, edges, crit)
+    chain = [i for i in crit if i in ids]
+    c0 = min((start_of(i) for i in chain if start_of(i)), default=None)
+    c1 = max((end_of(i) for i in chain if end_of(i)), default=None)
+    g.update(critical=crit, critical_days=(_dd(c1, c0) + 1) if c0 and c1 else 0,
+             critical_start=c0.isoformat() if c0 else None, critical_end=c1.isoformat() if c1 else None)
+    return g
+
+
 def problem_paths(ctx, sid):
-    """Um "caminho" por risco cadastrado: aplica os dias de atraso estimados nas atividades ligadas ao risco,
-    recalcula a previsão e devolve o caminho crítico resultante até a data-limite (competição).
-    Tudo é simulação: nada muda no planejamento oficial."""
-    net, base = official(ctx, sid)
-    by_id = {a["id"]: a for a in base["activities"]}
+    """Uma caixa por risco cadastrado, com o diagrama do caminho até a competição (ver comentário acima)."""
     db = ctx.db
+    season_or_400(db, sid)
+    cfg = load_config(db, sid)
+    deadline = _d(cfg.get("deadline"))
+    acts = db.q("SELECT * FROM activities WHERE season_id=? AND deleted_at IS NULL AND archived_at IS NULL", (sid,))
+    A = {a["id"]: a for a in acts}
+    for a in acts:
+        a["ps"], a["pe"] = _d(a["planned_start"]) or _d(a["planned_end"]), _d(a["planned_end"]) or _d(a["planned_start"])
+        a["bs"], a["be"] = _d(a.get("baseline_start")) or a["ps"], _d(a.get("baseline_end")) or a["pe"]
+    deps = [d for d in db.q("SELECT predecessor_id, successor_id, type, lag_days FROM dependencies")
+            if d["predecessor_id"] in A and d["successor_id"] in A]
+    order, indeg, succ = [], {i: 0 for i in A}, {i: [] for i in A}
+    for d in deps:
+        indeg[d["successor_id"]] += 1
+        succ[d["predecessor_id"]].append(d)
+    q = [i for i in A if indeg[i] == 0]
+    while q:
+        i = q.pop()
+        order.append(i)
+        for d in succ[i]:
+            indeg[d["successor_id"]] -= 1
+            if indeg[d["successor_id"]] == 0:
+                q.append(d["successor_id"])
+    order += [i for i in A if i not in set(order)]   # ciclo (não deveria existir): ficam no fim, sem propagar
+    plan_end = max((a["pe"] for a in acts if a["pe"]), default=None)
     links = {}
     for l in db.q("SELECT * FROM risk_links WHERE entity_type='activity'"):
-        links.setdefault(l["risk_id"], []).append(l)
+        if l["entity_id"] in A:
+            links.setdefault(l["risk_id"], []).append(l)
     top = _top_band(db)
-    k0 = base["kpis"]
     boxes = []
     for r in risk_rows(db, sid):
-        affected, changes = [], []
-        for l in links.get(r["id"], []):
-            a = by_id.get(l["entity_id"])
-            if not a:
-                continue
-            affected.append({"activity_id": a["id"], "title": a["title"], "area_id": a["area_id"], "days": l["est_delay_days"], "note": l["note"],
-                             "done": a["done"], "in_network": a["in_network"]})
-            if l["est_delay_days"] and a["in_network"] and not a["done"]:
-                changes.append({"kind": "extra_days", "activity_id": a["id"], "days": l["est_delay_days"]})
+        ls = links.get(r["id"], [])
+        occurred = r["status"] == "ocorrido"
         box = {"risk_id": r["id"], "code": r["code"], "title": r["title"], "cause": r.get("cause"), "consequence": r.get("consequence"),
                "level": r.get("original_level") or r.get("level"), "critical": critical_risk(r, top), "status": r["status"],
+               "occurred": occurred, "occurrence_result": r.get("occurrence_result"), "description": r.get("description"),
                "mitigation": r.get("mitigation"), "contingency_plan": r.get("contingency_plan"), "preventive_plan": r.get("preventive_plan"),
-               "affected": affected, "extra_days_total": sum(c["days"] for c in changes), "path": [], "forecast_finish": k0["forecast_finish"],
-               "delta_days": 0, "deadline": k0["deadline"], "deadline_margin": k0["deadline_margin"], "estimated": bool(affected)}
-        res = None
-        if changes:
-            sim = simulate(ctx, net, base, {"changes": changes, "risk_id": r["id"]})
-            if sim.get("error"):
-                box["error"] = sim["error"]
-            else:
-                sm, res = sim["summary"], sim["analysis"]
-                box.update({"forecast_finish": sm["forecast_finish"], "delta_days": sm["forecast_delta_days"] or 0, "deadline_margin": sm["deadline_margin"]})
-        src = res or base
-        acts = {a["id"]: a for a in src["activities"]}
-        hit = {c["activity_id"]: c["days"] for c in changes}
-        # caminho: o caminho crítico previsto que passa pelas atividades afetadas (ou o principal, se nenhum passar)
-        paths = src["paths"]["forecast"] or []
-        best = next((p for p in paths if any(i in hit for i in p)), paths[0] if paths else [])
-        for i in best:
-            a = acts.get(i)
-            if a and a["in_network"] and not a["done"]:
-                box["path"].append({"activity_id": i, "title": a["title"], "area_id": a["area_id"], "start": a["forecast"]["start"],
-                                    "finish": a["forecast"]["finish"], "extra_days": hit.get(i, 0)})
+               "needs_review": bool(r.get("needs_review")), "review_note": r.get("review_note"), "deadline": cfg.get("deadline")}
+        if occurred:
+            over = {l["entity_id"]: l["est_delay_days"] for l in ls}
+            notes = {l["entity_id"]: l["note"] for l in ls}
+
+            def delay_of(i, over=over):
+                a = A[i]
+                if over.get(i) is not None:
+                    return over[i]
+                return max(0, _dd(_d(a["actual_end"]), a["be"]) or 0)
+
+            def end_of(i, over=over):
+                a = A[i]
+                if over.get(i) is not None and a["be"]:
+                    return a["be"] + timedelta(days=over[i])
+                return _d(a["actual_end"]) or a["pe"]
+
+            start_of = lambda i: _d(A[i]["actual_start"]) or A[i]["ps"]  # noqa: E731
+            plan_of = lambda i: (A[i]["bs"], A[i]["be"])  # noqa: E731
+            ev_date = _d(r.get("identified_at"))
+            box["event_date"], box["event_date_kind"] = (ev_date.isoformat() if ev_date else None), "ocorrido"
+            ids = list(over)
+            # inclui as atividades que ligam as afetadas entre si (para o caminho não ficar interrompido no diagrama)
+            down, up = {}, {}
+            for d in deps:
+                down.setdefault(d["predecessor_id"], []).append(d["successor_id"])
+                up.setdefault(d["successor_id"], []).append(d["predecessor_id"])
+
+            def reach(start, nxt):
+                seen, st = set(), list(start)
+                while st:
+                    for j in nxt.get(st.pop(), []):
+                        if j not in seen:
+                            seen.add(j)
+                            st.append(j)
+                return seen
+            ids += sorted((reach(ids, down) & reach(ids, up)) - set(ids))
+            box["affected"] = [{"activity_id": i, "title": A[i]["title"], "area_id": A[i]["area_id"], "days": delay_of(i), "note": notes.get(i),
+                                "plan_end": A[i]["be"].isoformat() if A[i]["be"] else None, "actual_end": A[i]["actual_end"]} for i in ids if i in over]
+        else:
+            extra = {l["entity_id"]: l["est_delay_days"] or 0 for l in ls}
+            dl, drv = {}, {}
+            for i in order:
+                best, who = 0, None
+                for d in deps:
+                    if d["successor_id"] == i and dl.get(d["predecessor_id"], 0) > 0:
+                        v = dl[d["predecessor_id"]] - _slack(d["type"], A[d["predecessor_id"]], A[i])
+                        if v > best:
+                            best, who = v, d["predecessor_id"]
+                dl[i] = extra.get(i, 0) + best
+                drv[i] = who
+            ids = [i for i in A if i in extra or dl[i] > 0]
+            delay_of = lambda i: dl.get(i, 0)  # noqa: E731
+            end_of = lambda i: A[i]["pe"] + timedelta(days=dl.get(i, 0)) if A[i]["pe"] else None  # noqa: E731
+            start_of = lambda i: A[i]["ps"]  # noqa: E731
+            plan_of = lambda i: (A[i]["ps"], A[i]["pe"])  # noqa: E731
+            ev_date = min((A[i]["ps"] for i in extra if A[i]["ps"]), default=None)
+            box["event_date"], box["event_date_kind"] = (ev_date.isoformat() if ev_date else None), "estimado"
+            box["affected"] = [{"activity_id": l["entity_id"], "title": A[l["entity_id"]]["title"], "area_id": A[l["entity_id"]]["area_id"],
+                                "days": l["est_delay_days"], "note": l["note"]} for l in ls]
+        box["extra_days_total"] = None if occurred else sum(x["days"] or 0 for x in box["affected"])
+        box["max_delay"] = max((x["days"] or 0 for x in box["affected"]), default=0)
+        box["estimated"] = bool(ls)
+        g = _graph(ids, A, deps, r["title"], ev_date, start_of, end_of, delay_of, plan_of, occurred)
+        box["graph"] = g
+        chain = [i for i in g["critical"] if i in A]
+        box["path"] = [{"activity_id": i, "title": A[i]["title"], "area_id": A[i]["area_id"], "start": (start_of(i) or date.min).isoformat(),
+                        "finish": end_of(i).isoformat() if end_of(i) else None, "extra_days": delay_of(i)} for i in chain]
+        if occurred:
+            fin = max((end_of(i) for i in ids if end_of(i)), default=None)
+            box["delta_days"] = max((delay_of(i) for i in chain[-1:]), default=0)
+            box["plan_chain_end"] = max((A[i]["be"] for i in ids if A[i]["be"]), default=None)
+            box["plan_chain_end"] = box["plan_chain_end"].isoformat() if box["plan_chain_end"] else None
+        else:
+            fin = max((end_of(i) for i in A if end_of(i)), default=None)
+            box["delta_days"] = _dd(fin, plan_end) or 0
+        box["forecast_finish"] = fin.isoformat() if fin else None
+        box["deadline_margin"] = _dd(deadline, fin)
         box["meets_deadline"] = None if box["deadline_margin"] is None else box["deadline_margin"] >= 0
         boxes.append(box)
-    boxes.sort(key=lambda b: (-(b["delta_days"] or 0), b["code"] or ""))
-    return {"items": boxes, "official": {"forecast_finish": k0["forecast_finish"], "plan_finish": k0["plan_finish"], "deadline": k0["deadline"],
-                                         "deadline_margin": k0["deadline_margin"]}, "computed_at": base["computed_at"]}
+    boxes.sort(key=lambda b: (0 if b["occurred"] else 1, (b["event_date"] or "9999") if b["occurred"] else "", -(b["delta_days"] or 0), b["code"] or ""))
+    pe = plan_end.isoformat() if plan_end else None
+    return {"items": boxes, "official": {"forecast_finish": pe, "plan_finish": pe, "deadline": cfg.get("deadline"),
+                                         "deadline_margin": _dd(deadline, plan_end)},
+            "layout": {"node_w": NW, "node_h": NH, "r": NR}, "computed_at": now_iso()}
 
 
 @route("GET", "/api/cpm/problems")
