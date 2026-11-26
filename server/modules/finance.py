@@ -358,17 +358,31 @@ def finance_summary(db, season_id, date_from=None, date_to=None, area_id=None):
 
     areas = {a["id"]: a["name"] for a in db.q("SELECT id, name FROM areas")}
     types = acquisition_types(db)
+    # Planejado × realizado por área: soma TUDO o que a área recebeu — compras em dinheiro e itens/serviços obtidos por
+    # patrocínio ou doação (pelo valor estimado). "Pago" continua sendo só o dinheiro que saiu do caixa.
+    # Item patrocinado conta como realizado quando está marcado como realizado ou tem data de entrega até hoje.
+    def done(e):
+        return e["status"] == "realizada" or (not e["is_cash"] and bool(e.get("delivery_date")) and e["delivery_date"] <= today)
+
     by_area = {}
     for e in live:
         k = areas.get(e["area_id"], _t("(sem área)"))
-        row = by_area.setdefault(k, {"key": k, "area_id": e["area_id"], "planned": 0, "realized": 0, "paid": 0, "in_kind": 0})
+        row = by_area.setdefault(k, {"key": k, "area_id": e["area_id"], "planned": 0, "realized": 0, "paid": 0, "in_kind": 0,
+                                     "planned_cash": 0, "realized_cash": 0, "realized_in_kind": 0, "items": 0})
+        row["items"] += 1
+        plan_v = e["total_planned_cents"] if e["total_planned_cents"] is not None else (e["total_actual_cents"] or 0)
+        real_v = etotal(e) if done(e) else 0
+        row["planned"] += plan_v or 0
+        row["realized"] += real_v
         if e["is_cash"]:
-            row["planned"] += e["total_planned_cents"] or 0
-            row["realized"] += (e["total_actual_cents"] or 0) if e["status"] == "realizada" else 0
+            row["planned_cash"] += plan_v or 0
+            row["realized_cash"] += real_v
             row["paid"] += paid_by.get(e["id"], 0)
         else:
             row["in_kind"] += etotal(e)
-    by_area = [{**r, **{k: from_cents(r[k]) for k in ("planned", "realized", "paid", "in_kind")}} for r in by_area.values()]
+            row["realized_in_kind"] += real_v
+    money_keys = ("planned", "realized", "paid", "in_kind", "planned_cash", "realized_cash", "realized_in_kind")
+    by_area = sorted([{**r, **{k: from_cents(r[k]) for k in money_keys}} for r in by_area.values()], key=lambda r: -r["planned"])
 
     # fluxo de caixa mensal (somente movimentos efetivos) + projeções separadas
     dates = [m["date"] for m in movs] + [e["due_date"] or e["purchase_date"] for e in cash] \
@@ -435,6 +449,7 @@ def finance_summary(db, season_id, date_from=None, date_to=None, area_id=None):
             "Execução do orçamento": _t("realizado ÷ orçamento total planejado"),
             "Captado ainda não recebido": _t("receitas confirmadas − recebimentos registrados"),
             "Apoio não financeiro": _t("valor estimado dos itens e serviços recebidos por patrocínio/doação (não entra no caixa)"),
+            "Planejado × realizado por área": _t("soma de todos os itens da área: compras em dinheiro e itens/serviços recebidos por patrocínio ou doação (valor estimado). Realizado = itens realizados ou, no caso de patrocínio, já entregues; Pago = só o dinheiro que saiu do caixa"),
         },
     }
 
