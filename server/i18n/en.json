@@ -1357,5 +1357,12 @@
  "Sim, margem de {0} dia(s)": "Yes, {0} day(s) of margin",
  "Trabalho afetado concluído em": "Affected work finished on",
  "não estimado": "not estimated",
- "{0} dias": "{0} days"
+ "{0} dias": "{0} days",
+ "soma de todos os itens da área: compras em dinheiro e itens/serviços recebidos por patrocínio ou doação (valor estimado). Realizado = itens realizados ou, no caso de patrocínio, já entregues; Pago = só o dinheiro que saiu do caixa": "sum of all of the area's items: cash purchases and items/services received through sponsorship or donation (estimated value). Realized = items done or, for sponsorship, already delivered; Paid = only the money that left the cash account",
+ "Planejado (total)": "Planned (total)",
+ "Realizado (total)": "Realized (total)",
+ "Planejado em dinheiro": "Planned in cash",
+ "Realizado em dinheiro": "Realized in cash",
+ "Apoio não financeiro entregue": "In-kind support delivered",
+ "Planejado e realizado (total) somam as compras em dinheiro e os itens/serviços recebidos por patrocínio ou doação, pelo valor estimado. “Pago” é só o dinheiro que saiu do caixa.": "Planned and realized (total) add cash purchases and items/services received through sponsorship or donation, at their estimated value. “Paid” is only the money that left the cash account."
 }
