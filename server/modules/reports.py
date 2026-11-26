@@ -330,8 +330,10 @@ def r_financeiro(b):
     b.add("movimentos", _t("Movimentos de caixa"), table={"columns": [_t("Data"), _t("Tipo"), _t("Origem"), _t("Valor"), _t("Método"), _t("Observação"), _t("Lançado por")], "widths": [6, 5, 16, 6, 6, 14, 9],
                                                     "rows": [[fmt_date(m["date"]), _t("Entrada") if m["direction"] == "entrada" else _t("Saída"), m["origin"], from_cents(m["amount_cents"]), m["method"], m["note"], b.user(m["created_by"])] for m in movs],
                                                     "empty": _t("Nenhum pagamento ou recebimento registrado.")})
-    b.add("areas", _t("Custos por área"), table={"columns": [_t("Área"), _t("Planejado"), _t("Realizado"), _t("Pago"), _t("Apoio não financeiro (estimado)")],
-                                           "rows": [[r["key"], r["planned"], r["realized"], r["paid"], r["in_kind"]] for r in fs["by_area"]]})
+    b.add("areas", _t("Custos por área"), table={"columns": [_t("Área"), _t("Itens"), _t("Planejado (total)"), _t("Realizado (total)"), _t("Planejado em dinheiro"), _t("Realizado em dinheiro"), _t("Pago"), _t("Apoio não financeiro (estimado)"), _t("Apoio não financeiro entregue")],
+                                           "widths": [12, 4, 8, 8, 8, 8, 7, 9, 9],
+                                           "rows": [[r["key"], r["items"], r["planned"], r["realized"], r["planned_cash"], r["realized_cash"], r["paid"], r["in_kind"], r["realized_in_kind"]] for r in fs["by_area"]]},
+          note=_t("Planejado e realizado (total) somam as compras em dinheiro e os itens/serviços recebidos por patrocínio ou doação, pelo valor estimado. “Pago” é só o dinheiro que saiu do caixa."))
     b.add("metodologia", _t("Fórmulas utilizadas"), kv=list(fs["formulas"].items()))
 
 
